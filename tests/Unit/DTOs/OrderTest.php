@@ -104,6 +104,24 @@ final class OrderTest extends TestCase
         self::assertSame($notes, $values['notes']);
     }
 
+    public function testNumberIsOmittedWhenTheStreetCarriesIt(): void
+    {
+        $xml = (new Order(
+            uniqueId: 'UNQ-1',
+            recipientName: 'Ion Popescu',
+            phone: '0712345678',
+            city: 'Bucharest',
+            street: 'Nicolae Oncescu nr. 6',
+            service: ServiceType::National24,
+            weight: 0.5,
+            district: 'Sect 1',
+            clientCode: 1234,
+        ))->toXml();
+
+        self::assertArrayNotHasKey('no', $this->values($xml));
+        self::assertSame('Nicolae Oncescu nr. 6', $this->values($xml)['street']);
+    }
+
     public function testExplicitClientCodeWinsOverTheDefault(): void
     {
         self::assertSame('9999', $this->values($this->order()->toXml(1234))['client']);

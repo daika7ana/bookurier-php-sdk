@@ -58,8 +58,8 @@ $order = new Order(
     recipientName: 'Ionescu Vasile',
     phone: '0744-666847',
     city: 'Bucuresti',
-    street: 'Nicolae Oncescu',
-    number: '6',
+    street: 'Nicolae Oncescu nr. 6',
+
     service: ServiceType::Bucharest24h,
     weight: 0.5,
     district: 'Sect 1',
@@ -72,9 +72,10 @@ $awb = $client->orders()->create($order);
 echo $awb; // e.g. BOK3925457
 ```
 
-`create()` returns the AWB as a string. Two shapes exist, chosen server-side by
-destination county: `BOK` plus seven digits (`BOK3925457`), or twelve digits
-(`062568455929`); the validator is the lenient `/^[A-Za-z]{0,4}\d{3,}$/`. `uniqueId` is your correlation id only;
+`create()` returns the AWB as a string. Formats vary server-side by destination
+county and service: `BOK` plus seven digits (`BOK3925457`), twelve digits
+(`062568455929`), or `CKC` plus six digits (`CKC122336`); the validator is the
+lenient `/^[A-Za-z]{0,4}\d{3,}$/`. `uniqueId` is your correlation id only;
 Bookurier does not enforce it, and submitting the same value twice creates two
 orders. To create several orders in one call, pass the list to `createBatch()`; it
 returns one `OrderReference` per order, paired positionally. See [DTOs](DTOS.md)

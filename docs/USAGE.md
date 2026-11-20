@@ -29,8 +29,8 @@ $order = new Order(
     recipientName: 'Ionescu Vasile',
     phone: '0744-666847',
     city: 'Bucuresti',
-    street: 'Nicolae Oncescu',
-    number: '6',
+    street: 'Nicolae Oncescu nr. 6',
+
     service: ServiceType::Bucharest24h,
     weight: 0.5,
     packages: 1,
@@ -57,9 +57,10 @@ RON. `clientCode` is your Bookurier client code; when it is `null` the value of
 `ClientConfig::clientId` is used, and with neither set `create()` throws
 `InvalidArgumentException` before sending.
 
-`create()` returns the AWB as a string. Two shapes exist, chosen server-side by
-destination county: `BOK` plus seven digits (`BOK3925457`), or twelve digits
-(`062568455929`). The SDK treats either as an opaque string and validates with the
+`create()` returns the AWB as a string. Formats vary server-side by destination
+county and service: `BOK` plus seven digits (`BOK3925457`), twelve digits
+(`062568455929`), or `CKC` plus six digits for Bucharest Today
+(`CKC122336`). The SDK treats the AWB as an opaque string and validates with the
 lenient `/^[A-Za-z]{0,4}\d{3,}$/`. A body matching `/^-\d+$/` raises
 `ApiException`; any other non-AWB body raises `UnexpectedResponseException`.
 
@@ -75,8 +76,8 @@ $references = $client->orders()->createBatch([
         recipientName: 'Popescu Maria',
         phone: '0745-123456',
         city: 'Cluj-Napoca',
-        street: 'Memorandumului',
-        number: '12',
+        street: 'Memorandumului nr. 12',
+
         service: ServiceType::National24,
         weight: 1.2,
         district: 'Cluj',

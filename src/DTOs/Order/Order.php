@@ -16,6 +16,7 @@ final readonly class Order
      * @param string|null $district Sector ("Sect 1") or county, as Bookurier expects it.
      * @param float|null $insuredValue Declared value, in RON.
      * @param float|null $cashOnDelivery Cash on delivery amount, in RON.
+     * @param string|null $number Street number; leave null when it is part of `$street`.
      */
     public function __construct(
         public string $uniqueId,
@@ -23,7 +24,6 @@ final readonly class Order
         public string $phone,
         public string $city,
         public string $street,
-        public string $number,
         public ServiceType $service,
         public float $weight,
         public int $packages = 1,
@@ -31,6 +31,7 @@ final readonly class Order
         public ?string $zip = null,
         public ?string $district = null,
         public ?string $email = null,
+        public ?string $number = null,
         public ?string $block = null,
         public ?string $entrance = null,
         public ?string $floor = null,

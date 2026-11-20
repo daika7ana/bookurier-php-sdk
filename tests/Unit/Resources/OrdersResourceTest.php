@@ -360,6 +360,7 @@ final class OrdersResourceTest extends TestCase
     {
         yield 'BOK prefix' => ['BOK3925457'];
         yield 'partner 12 digits' => ['062568455929'];
+        yield 'CKC prefix' => ['CKC122336'];
         yield 'plain digits' => ['3925457'];
     }
 

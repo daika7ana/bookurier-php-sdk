@@ -40,9 +40,10 @@ document endpoint, challenge page      -> UnexpectedResponseException
 
 `UnexpectedResponseException` is also used when `orders()->create()` receives a
 body that does not match the SDK's lenient AWB validator
-(`/^[A-Za-z]{0,4}\d{3,}$/`). AWBs come in two shapes, chosen server-side by
-destination county: `BOK` plus seven digits (`BOK3925457`) or twelve digits
-(`062568455929`); both are opaque strings to the SDK.
+(`/^[A-Za-z]{0,4}\d{3,}$/`). AWB formats vary server-side by destination county
+and service: `BOK` plus seven digits (`BOK3925457`), twelve digits
+(`062568455929`), or `CKC` plus six digits (`CKC122336`); all are opaque strings
+to the SDK.
 
 Document endpoints reject a body matching `/^-\d+$/` and the host's HTML
 challenge page. Any other body is returned as a `Document`, so a proxy or gateway

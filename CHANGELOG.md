@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-11-20
+
+### Added
+
+- `ServiceType::BucharestToday` (`7`), `Extins` (`5`), `NationalEconomic` (`8`)
+  and `NationalPremium` (`11`), completing the plugin's service picker. `9` is
+  labelled "National Standard", matching the plugin.
+
+### Changed
+
+- `Order::$number` is now optional and sits after `email` in the constructor: omit it when the street number is part of `$street`. The service accepts orders without `<no>`.
+
+### Fixed
+
+- Documentation: AWB formats are not limited to two shapes. A `7` Bucharest Today
+  order answered `CKC122336`, so the SDK documents `BOK` + 7 digits, 12 digits
+  and `CKC` + 6 digits, all accepted by the existing lenient validator.
+- Documented that the service field is not validated server-side: undocumented
+  codes (`4`, `5`, `6`, `8`, `10`) all produced AWBs in a 2026-11-20 probe.
+
 ## [1.0.0] - 2026-11-20
 
 ### Added
@@ -38,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `createBatch`, `delete` and pickup.
 
 ### Changed
+
 
 - `ResponseBody::document()` rejects the host's HTML bot-filter challenge page on
   every document endpoint with `UnexpectedResponseException`; `pdf()` and

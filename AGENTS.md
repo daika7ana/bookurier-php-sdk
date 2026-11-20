@@ -122,12 +122,14 @@ vendor/bin/pint     # the only way to auto-fix style
   `returnDocumentDescription`→`ret_doc_desc`, `insuredValue`→`insurance_val`,
   `clientCode`→`client`. The documentation's `<exange_pack>` and `< status_desc >`
   are typos; emit `exchange_pack` and `status_desc`.
+- `Order::$number` is optional: many integrations send one street string (`Nicolae Oncescu nr. 6`). `<no>` is omitted when it is null; the service accepted an order without `<no>` in a 2026-11-20 probe.
 - `unq` is the caller's own order id. It is **not** a deduplication key: two
   orders with the same `unq` both get AWBs on the live service. AWBs come in two
   shapes, chosen server-side by destination county (2026-11-20 probe): `BOK` plus
-  seven digits (`BOK3925457`) on the own network, or twelve digits
+  seven digits (`BOK3925457`) on the own network, twelve digits
   (`062568455929`) on partner routes (seen for Cluj, Iasi, Timis, Suceava,
-  Bihor). The SDK treats either as an opaque string and validates with the
+  Bihor), or `CKC` plus six digits (`CKC122336`) for service `7` Bucharest
+  Today). The SDK treats the AWB as an opaque string and validates with the
   lenient `/^[A-Za-z]{0,4}\d{3,}$/`; a mixed batch returns both shapes
   comma-separated. `<client>`
   (your client code) is required in the order XML — `Order::$clientCode`, or
@@ -147,8 +149,13 @@ vendor/bin/pint     # the only way to auto-fix style
   "One moment, please…" challenge page, which surfaces as
   `UnexpectedResponseException` on every endpoint, document endpoints included.
   Space live tests out; a blocked window clears after a few minutes.
-- Services are Romanian only: `1` Bucharest 24h, `2` Bucharest express,
-  `3` Metropolitan, `9` National 24h (`ServiceType`).
+- Services are Romanian only (`ServiceType`), matching the plugin's service
+  picker: `1` Bucharest 24h, `3` Metropolitan, `5` Extins, `7` Bucharest Today,
+  `8` National Economic, `9` National Standard, `11` National Premium. Code `2`
+  (Bucharest express) exists only in the original documentation and is not
+  offered by the plugin. The service field is not validated server-side: codes
+  `4`, `5`, `6`, `8` and `10` all produced AWBs in a 2026-11-20 probe, so
+  an undocumented value silently behaves like a default.
 - HTTPS is the default despite the documentation listing `http://` URLs. The
   documentation also has endpoint typos (`add_ cmds.php` with a space); use
   `ClientConfig::BASE_URL`.

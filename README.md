@@ -44,7 +44,7 @@ API request — there is no API key, OAuth exchange or token refresh.
 - ✅ **All 15 Vendor Endpoints** — Create, batch create, delete, status, history, labels, daily bordero and pickup
 - ✅ **Byte-Exact Documents** — HTML and PDF labels, daily bordero documents and pickup borderos are returned as the raw response body, not re-encoded
 - ✅ **In-Band Error Mapping** — HTTP 200 error bodies (`-1`, `-2`, `-3`) become `ApiException`; authentication, transport and unexpected bodies have their own exception types
-- ✅ **Two AWB Shapes** — `BOK` plus seven digits on the own network, or twelve digits on partner routes; both are treated as opaque strings and validated leniently
+- ✅ **Opaque AWB Formats** — `BOK` plus seven digits, twelve digits on partner routes, or `CKC` plus six digits for Bucharest Today; all are treated as opaque strings and validated leniently
 - ✅ **Document Guards** — PDF labels must start with `%PDF`; the host's HTML challenge page and empty bodies are rejected
 - ✅ **Static Analysis with PHPStan** — Level 8 over the `src/` codebase
 - ✅ **Zero Framework Coupling** — No Laravel, Symfony or other framework in `require`; no service provider required
@@ -94,8 +94,8 @@ $awb = $client->orders()->create(new Order(
     recipientName: 'Ionescu Vasile',
     phone: '0744-666847',
     city: 'Bucuresti',
-    street: 'Nicolae Oncescu',
-    number: '6',
+    street: 'Nicolae Oncescu nr. 6',
+
     service: ServiceType::Bucharest24h,
     weight: 0.5,
     district: 'Sect 1',
@@ -228,10 +228,11 @@ from the documentation, then checked against the live service with Bookurier's
 test account, which established these points and corrected several in the
 documentation:
 
-- AWBs come in two shapes, chosen server-side by destination county: `BOK` plus
-  seven digits on the own network (`BOK3925457`), or twelve digits on partner
-  routes (`062568455929`). The SDK treats either as an opaque string and
-  validates with the lenient `/^[A-Za-z]{0,4}\d{3,}$/`.
+- AWBs vary server-side by destination county and service: `BOK` plus seven
+  digits on the own network (`BOK3925457`), twelve digits on partner routes
+  (`062568455929`), or `CKC` plus six digits for Bucharest Today (`CKC122336`).
+  The SDK treats the AWB as an opaque string and validates with the lenient
+  `/^[A-Za-z]{0,4}\d{3,}$/`.
 - Failures are negative codes in a HTTP 200 body: `-1` rejected request, `-2`
   record not found / invalid data, `-3` incomplete request.
 - `add_cmd.php` requires `<client>` (your client code).

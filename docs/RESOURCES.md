@@ -51,9 +51,10 @@ Creates one order and returns the generated AWB.
   `Order::$district` (sector or county) is required too: an empty value throws
   `InvalidArgumentException` locally, and the service answers `-5` if it reaches
   the API.
-- **Returns:** the AWB as a string. Two shapes exist, chosen server-side by
-  destination county: `BOK` plus seven digits (`BOK3925457`), or twelve digits
-  (`062568455929`). The SDK treats either as an opaque string and validates with
+- **Returns:** the AWB as a string. Formats vary server-side by destination
+  county and service: `BOK` plus seven digits (`BOK3925457`), twelve digits
+  (`062568455929`), or `CKC` plus six digits for Bucharest Today service `7`
+  (`CKC122336`). The SDK treats the AWB as an opaque string and validates with
   the lenient `/^[A-Za-z]{0,4}\d{3,}$/`.
 - **Throws:** `AuthenticationException`, `ApiException`, `TransportException`,
   `InvalidArgumentException` (no client code or empty district), and `UnexpectedResponseException`
@@ -66,8 +67,8 @@ $awb = $client->orders()->create(new Order(
     recipientName: 'Ionescu Vasile',
     phone: '0744-666847',
     city: 'Bucuresti',
-    street: 'Nicolae Oncescu',
-    number: '6',
+    street: 'Nicolae Oncescu nr. 6',
+
     service: ServiceType::Bucharest24h,
     weight: 0.5,
 ));
@@ -277,7 +278,7 @@ in [DTOs](DTOS.md):
 
 - [`Order` request fields](DTOS.md#order-request-dto) — XML tag for every
   constructor argument and the serialization rules.
-- [`ServiceType` enum](DTOS.md#servicetype-enum) — the four service codes.
+- [`ServiceType` enum](DTOS.md#servicetype-enum) — the service codes and their labels.
 - [Response DTOs](DTOS.md#response-dtos) — `OrderStatus`, `HistoryEntry` and
   `OrderReference`.
 - [`Document`](DTOS.md#document) — `$contents`, `$mimeType` and `isPdf()`.

@@ -70,8 +70,8 @@ final class OrdersResourceTest extends TestCase
             recipientName: 'Ion Popescu',
             phone: '0712345678',
             city: 'Bucharest',
-            street: 'Piața Unirii',
-            number: '10',
+            street: 'Piața Unirii nr. 10',
+
             service: ServiceType::BucharestExpress,
             weight: 2.5,
         ));

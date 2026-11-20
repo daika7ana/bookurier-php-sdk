@@ -19,7 +19,7 @@ required; everything else may be omitted.
 | `phone` | `phone` | `string` | Yes |
 | `city` | `city` | `string` | Yes |
 | `street` | `street` | `string` | Yes |
-| `number` | `no` | `string` | Yes |
+| `number` | `no` | `?string` | No; omit it when the number is part of `street` |
 | `service` | `service` | `ServiceType` | Yes |
 | `weight` | `weight` | `float` | Yes |
 | `packages` | `packs` | `int` | No, default `1` |
@@ -69,8 +69,8 @@ $order = new Order(
     recipientName: 'Ionescu Vasile',
     phone: '0744-666847',
     city: 'Bucuresti',
-    street: 'Nicolae Oncescu',
-    number: '6',
+    street: 'Nicolae Oncescu nr. 6',
+
     service: ServiceType::Bucharest24h,
     weight: 0.5,
     district: 'Sect 1',
@@ -89,9 +89,19 @@ is what goes into `<service>`. `label()` returns the English description.
 | Case | Value | `label()` |
 |---|---|---|
 | `Bucharest24h` | `1` | `Bucharest 24h` |
-| `BucharestExpress` | `2` | `Bucharest express` |
+| `BucharestExpress` | `2` | `Bucharest express` (documentation only) |
 | `Metropolitan` | `3` | `Metropolitan` |
-| `National24` | `9` | `National 24h` |
+| `Extins` | `5` | `Extins` |
+| `BucharestToday` | `7` | `Bucharest Today` |
+| `NationalEconomic` | `8` | `National Economic` |
+| `National24` | `9` | `National Standard` |
+| `NationalPremium` | `11` | `National Premium` |
+
+Codes and labels follow the plugin's service picker, which offers `1`, `3`, `5`,
+`7`, `8`, `9` and `11`. Code `2` appears only in the original documentation. The
+service field is not validated server-side: codes `4`, `5`, `6`, `8` and
+`10` all produced AWBs in a 2026-11-20 probe, so an unlisted value silently
+behaves like a default. Use the codes above.
 
 ## Response DTOs
 
