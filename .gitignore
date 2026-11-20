@@ -1,0 +1,29 @@
+/vendor/
+/composer.lock
+
+# Local credentials
+/.env
+/.env.*
+
+# PHPUnit
+/.phpunit.cache
+/phpunit.xml
+
+# PHPStan / Larastan
+/.phpstan.cache
+
+# IDE
+/.idea/
+/.vscode/
+/.codegraph/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build / coverage
+/build/
+/coverage/
+/.php-cs-fixer.cache
