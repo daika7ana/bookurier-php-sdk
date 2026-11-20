@@ -1,6 +1,6 @@
-# Bookurier PHP SDK
-
 <div align="center">
+
+<h1>Bookurier PHP SDK</h1>
 
 [![CI](https://github.com/daika7ana/bookurier-php-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/daika7ana/bookurier-php-sdk/actions/workflows/ci.yml)
 [![PHP 8.3+](https://img.shields.io/badge/PHP-8.3%2B-777BB4?style=flat-square&logo=php)](https://www.php.net/)
@@ -30,29 +30,32 @@ API request — there is no API key, OAuth exchange or token refresh.
 - [Configuration](#configuration)
 - [Authentication](#authentication)
 - [Supported Resources](#supported-resources)
-- [Custom HTTP Client](#custom-http-client)
-- [Error Handling](#error-handling)
-- [Documentation Limits](#documentation-limits)
+- [Framework Support](#framework-support)
 - [Testing](#testing)
 - [Documentation](#documentation)
-- [License](#license)
 
 ## Features
 
-- **PSR-18 core** — the bundled Guzzle transport is used by default; any PSR-18
-  client can be supplied instead.
-- **Typed DTOs** — build a shipment with `Order` and read status, history and
-  batch results from readonly response objects.
-- **XML built and parsed internally** — order payloads are escaped and wrapped
-  for you; the API's `<cmd>` envelopes are mapped to DTOs.
-- **Byte-exact documents** — HTML and PDF labels, daily bordero documents and
-  pickup borderos are returned as the raw response body, not re-encoded.
-- **All vendor endpoints** — create, batch create, delete, status, history,
-  labels, daily bordero and pickup.
-- **Typed error mapping** — authentication, in-band API errors, transport
-  failures and unexpected bodies are separate exception types.
-- **No framework coupling** — no Laravel, Symfony or other framework in
-  `require`; no service provider required.
+### Core Strengths
+
+- ✅ **PSR-18 HTTP Client** — Bundled Guzzle transport by default; any PSR-18 client can be supplied instead
+- ✅ **Typed DTOs** — Build a shipment with `Order`; read status, history and batch results from readonly response objects
+- ✅ **XML Built and Parsed Internally** — Order payloads are escaped and wrapped for you; the API's `<cmd>` envelopes are mapped to DTOs
+- ✅ **All 15 Vendor Endpoints** — Create, batch create, delete, status, history, labels, daily bordero and pickup
+- ✅ **Byte-Exact Documents** — HTML and PDF labels, daily bordero documents and pickup borderos are returned as the raw response body, not re-encoded
+- ✅ **In-Band Error Mapping** — HTTP 200 error bodies (`-1`, `-2`, `-3`) become `ApiException`; authentication, transport and unexpected bodies have their own exception types
+- ✅ **Two AWB Shapes** — `BOK` plus seven digits on the own network, or twelve digits on partner routes; both are treated as opaque strings and validated leniently
+- ✅ **Document Guards** — PDF labels must start with `%PDF`; the host's HTML challenge page and empty bodies are rejected
+- ✅ **Static Analysis with PHPStan** — Level 8 over the `src/` codebase
+- ✅ **Zero Framework Coupling** — No Laravel, Symfony or other framework in `require`; no service provider required
+- ✅ **Comprehensive Tests** — Unit suite with a fake transport, plus a live smoke suite
+
+### Perfect For
+
+- 🎯 Romanian courier shipments — AWB labels, daily borderos and pickup requests
+- 🎯 PHP frameworks and standalone applications alike
+- 🎯 Type-safe order creation, status and history workflows
+- 🎯 Production integrations validated against the live service with a smoke suite
 
 ## Requirements
 
@@ -62,6 +65,8 @@ API request — there is no API key, OAuth exchange or token refresh.
 - A PSR-7/17/18 compatible environment
 
 ## Installation
+
+### Via Composer
 
 ```bash
 composer require daika7ana/bookurier-php-sdk
@@ -111,7 +116,16 @@ Resource methods do not accept a timeout; configure one on `ClientConfig` or use
 the low-level `Client::post()` / `Client::send()` methods. See
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
+That's it! You've created an AWB and written its PDF label to disk.
+
 ## Configuration
+
+### Base URL
+
+The default base URL is `https://www.bookurier.ro/colete/serv`. The vendor
+documentation lists `http://` URLs, but the SDK uses the same host over HTTPS.
+
+### Environment Variables
 
 `Client::create()` with no config calls `ClientConfig::fromEnvironment()`, which
 reads `BOOKURIER_USERNAME` (falling back to `BOOKURIER_USERID`),
@@ -119,10 +133,15 @@ reads `BOOKURIER_USERNAME` (falling back to `BOOKURIER_USERID`),
 `BOOKURIER_TIMEOUT`. A `ClientConfig` you construct yourself does not read the
 environment.
 
-For every variable, its default and the timeout precedence, see
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md). The default base URL is
-`https://www.bookurier.ro/colete/serv`; the documentation lists `http://` URLs,
-but the SDK uses the same host over HTTPS.
+For every variable and its default, see
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+### Request Timeouts
+
+Set a default on `ClientConfig::timeout`; per-call overrides exist on the
+low-level `Client::post()` / `Client::send()` methods. Precedence: per-call
+`Client::post(..., timeout:)` / `Client::send($request, $t)` →
+`ClientConfig::timeout` → transport constructor arguments → 30.0/10.0.
 
 ## Authentication
 
@@ -130,6 +149,16 @@ Bookurier authenticates with a Bookurier account username and password, sent as
 `userid` and `pwd` on every form POST. There is no API key, no OAuth exchange and
 no token refresh. `Client::post()` throws `AuthenticationException` before
 sending when either value is empty; `Client::send()` adds no credentials.
+
+```php
+use Daika7ana\Bookurier\Client;
+use Daika7ana\Bookurier\Config\ClientConfig;
+
+$client = Client::create(config: new ClientConfig(
+    userId: 'your-bookurier-user',
+    password: 'your-bookurier-password',
+));
+```
 
 Order XML requires `<client>` (your Bookurier client code). It comes from
 `Order::$clientCode`, or from `ClientConfig::clientId` when that is `null`. With
@@ -164,33 +193,7 @@ See [docs/RESOURCES.md](docs/RESOURCES.md) for the endpoint and return type of
 each method, and [docs/DTOS.md](docs/DTOS.md) for the request and response
 objects.
 
-## Custom HTTP Client
-
-A bare PSR-18 client is wrapped automatically:
-
-```php
-use Daika7ana\Bookurier\Client;
-use GuzzleHttp\Client as GuzzleClient;
-
-$client = Client::create(
-    httpClient: new GuzzleClient(['timeout' => 10.0]),
-);
-```
-
-A wrapped client keeps its own timeout, so `ClientConfig::timeout` must stay
-`null`; passing both throws `InvalidArgumentException`. Implement
-`Daika7ana\Bookurier\Http\HttpClientInterface` instead if you need the SDK's
-per-call timeout:
-
-```php
-use Daika7ana\Bookurier\Client;
-use Daika7ana\Bookurier\Http\HttpClientInterface;
-
-/** @var HttpClientInterface $transport */
-$client = Client::create(httpClient: $transport);
-```
-
-## Error Handling
+### Error Handling
 
 ```php
 use Daika7ana\Bookurier\Exceptions\ApiException;
@@ -218,7 +221,7 @@ try {
 Bookurier returns HTTP 200 even for errors, so the SDK classifies responses by
 body rather than status code. See [docs/ERRORS.md](docs/ERRORS.md).
 
-## Documentation Limits
+### Documentation Limits
 
 Bookurier publishes no OpenAPI schema and provides no sandbox. This SDK was built
 from the documentation, then checked against the live service with Bookurier's
@@ -249,14 +252,61 @@ documentation:
 never exercised against the live service; it is covered by unit tests only.
 Validate your own integration against your account before production rollout.
 
+## Framework Support
+
+### Zero Framework Dependencies
+
+This package works equally well everywhere, with no Laravel, Symfony or other
+framework in `require` and no service provider required:
+
+- 🌐 **Laravel** applications
+- 🌐 **Symfony** projects
+- 🌐 **Standalone PHP** applications
+- 🌐 **Microservices**
+- 🌐 Any **PHP 8.3+** environment
+
+### Custom HTTP Client
+
+A bare PSR-18 client is wrapped automatically:
+
+```php
+use Daika7ana\Bookurier\Client;
+use GuzzleHttp\Client as GuzzleClient;
+
+$client = Client::create(
+    httpClient: new GuzzleClient(['timeout' => 10.0]),
+);
+```
+
+A wrapped client keeps its own timeout, so `ClientConfig::timeout` must stay
+`null`; passing both throws `InvalidArgumentException`. Implement
+`Daika7ana\Bookurier\Http\HttpClientInterface` instead if you need the SDK's
+per-call timeout:
+
+```php
+use Daika7ana\Bookurier\Client;
+use Daika7ana\Bookurier\Http\HttpClientInterface;
+
+/** @var HttpClientInterface $transport */
+$client = Client::create(httpClient: $transport);
+```
+
 ## Testing
 
+### Run Static Analysis
+
 ```bash
-composer ci         # validate --strict -> pint --test -> phpstan -> phpunit tests/Unit
-composer pint       # style check only, never fixes
 composer stan       # PHPStan level 8 over src/
+# or
+vendor/bin/phpstan --no-progress
+```
+
+### Run Full Test Suite
+
+```bash
 composer test       # full PHPUnit suite
-composer test:unit  # tests/Unit only
+# or
+vendor/bin/phpunit
 ```
 
 The unit suite never touches the network and needs no Bookurier credentials: a
@@ -264,20 +314,60 @@ fake transport records the request and returns canned bodies. Every endpoint has
 a test covering both the outgoing request and the response mapping. See
 [docs/TESTING.md](docs/TESTING.md) for the helpers and an example test.
 
+### Run Live Smoke Tests
+
+```bash
+composer test:smoke # tests/Smoke only, needs BOOKURIER_TEST_* env vars
+```
+
+The smoke tests hit the live API. They skip themselves unless
+`BOOKURIER_TEST_USERNAME`, `BOOKURIER_TEST_PASSWORD` and
+`BOOKURIER_TEST_CLIENT_ID` are set; creating an AWB also needs
+`BOOKURIER_TEST_ALLOW_WRITES=1`.
+
+### Run The Same Checks As CI
+
+```bash
+composer ci         # validate --strict -> pint --test -> phpstan -> phpunit tests/Unit
+composer pint       # style check only, never fixes
+composer test:unit  # tests/Unit only
+```
+
+### Test Environment Variables
+
+Configure these in the environment to enable smoke tests:
+
+| Variable | Purpose |
+|----------|---------|
+| `BOOKURIER_TEST_USERNAME` | Test account username |
+| `BOOKURIER_TEST_PASSWORD` | Test account password |
+| `BOOKURIER_TEST_CLIENT_ID` | Bookurier client code |
+| `BOOKURIER_TEST_ALLOW_WRITES` | Set to `1` to create (and delete) a live AWB |
+
 ## Documentation
+
+Complete guides and references:
 
 | Guide | Purpose |
 |-------|---------|
-| [Installation](docs/INSTALLATION.md) | Requirements and setup |
-| [Quickstart](docs/QUICKSTART.md) | First AWB, PDF label, status and delete |
-| [Configuration](docs/CONFIGURATION.md) | Credentials, base URL, environment, timeouts, custom clients |
-| [Authentication](docs/AUTHENTICATION.md) | Account credentials, client code, rejected requests |
-| [Usage](docs/USAGE.md) | Orders, batches, status, history, labels, bordero documents, pickup |
-| [Resources](docs/RESOURCES.md) | Method-level endpoint reference |
-| [DTOs](docs/DTOS.md) | `Order` field mapping, enums and response objects |
-| [Errors](docs/ERRORS.md) | Exception hierarchy and failure modes |
-| [Testing](docs/TESTING.md) | Test commands and helpers |
-
-## License
+| 📖 [Quickstart](docs/QUICKSTART.md) | First AWB, PDF label, status and delete |
+| 🔧 [Installation](docs/INSTALLATION.md) | Requirements and setup |
+| ⚙️ [Configuration](docs/CONFIGURATION.md) | Credentials, base URL, environment, timeouts, custom clients |
+| 🔐 [Authentication](docs/AUTHENTICATION.md) | Account credentials, client code, rejected requests |
+| 📚 [Usage](docs/USAGE.md) | Orders, batches, status, history, labels, bordero documents, pickup |
+| 🔗 [Resources](docs/RESOURCES.md) | Method-level endpoint reference |
+| 📦 [DTOs](docs/DTOS.md) | `Order` field mapping, enums and response objects |
+| ❌ [Errors](docs/ERRORS.md) | Exception hierarchy and failure modes |
+| ✅ [Testing](docs/TESTING.md) | Test commands and helpers |
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+---
+
+<div align="center">
+
+Made with ❤️
+
+**Questions?** [Check the docs](docs/USAGE.md) or [open an issue](../../issues)
+
+</div>
