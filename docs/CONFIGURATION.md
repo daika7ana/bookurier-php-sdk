@@ -134,6 +134,12 @@ A per-call timeout replaces only the request timeout. The connect timeout comes
 from `GuzzleHttpClient`'s `connectTimeout:` argument; the SDK has no per-call
 connect timeout.
 
+When some calls need a different budget than the rest, derive a client:
+`$slowClient = $client->withTimeout(30.0);` returns a new client sharing the
+transport and the PSR-17 factories, carrying the credentials configured when it
+is derived, so no new transport is built; the original client keeps its
+timeout. `withTimeout(null)` returns to the transport default.
+
 `BOOKURIER_TIMEOUT` feeds `ClientConfig::timeout` through
 `ClientConfig::fromEnvironment()`, so it sits in the same chain and a non-numeric
 value throws `InvalidArgumentException`. Because `Client::create()` falls back to

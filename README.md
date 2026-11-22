@@ -112,9 +112,9 @@ file_put_contents("awb-{$awb}.pdf", $label->contents);
 For the full flow — order, label, status, delete and error handling — see
 [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
-Resource methods do not accept a timeout; configure one on `ClientConfig` or use
-the low-level `Client::post()` / `Client::send()` methods. See
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+Resource methods do not accept a timeout; configure one on `ClientConfig`, derive
+a client with `withTimeout()`, or use the low-level `Client::post()` /
+`Client::send()` methods. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 That's it! You've created an AWB and written its PDF label to disk.
 
@@ -142,6 +142,9 @@ Set a default on `ClientConfig::timeout`; per-call overrides exist on the
 low-level `Client::post()` / `Client::send()` methods. Precedence: per-call
 `Client::post(..., timeout:)` / `Client::send($request, $t)` →
 `ClientConfig::timeout` → transport constructor arguments → 30.0/10.0.
+
+For a different budget, `$slow = $client->withTimeout(30.0);` returns a new
+client sharing the transport; the original keeps its timeout.
 
 ## Authentication
 

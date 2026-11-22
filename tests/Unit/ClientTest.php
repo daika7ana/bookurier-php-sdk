@@ -96,6 +96,29 @@ final class ClientTest extends TestCase
         self::assertSame(7.5, $httpClient->lastTimeout);
     }
 
+    public function testWithTimeoutDerivesAClientSharingTransportAndCredentials(): void
+    {
+        [$client, $httpClient] = TestClientFactory::create(
+            config: new ClientConfig(userId: 'user', password: 'pass', timeout: 10.0),
+        );
+
+        $derived = $client->withTimeout(30.0);
+
+        self::assertSame(30.0, $derived->getConfig()->timeout);
+        self::assertSame(10.0, $client->getConfig()->timeout);
+        self::assertSame('user', $derived->getConfig()->userId);
+
+        $derived->post('get_stat.php', ['msg' => '<msg></msg>']);
+
+        self::assertSame(30.0, $httpClient->lastTimeout);
+
+        $request = $httpClient->lastRequest;
+        self::assertNotNull($request);
+        parse_str((string) $request->getBody(), $form);
+        self::assertSame('user', $form['userid']);
+        self::assertSame('pass', $form['pwd']);
+    }
+
     public function testPerCallTimeoutOverridesTheConfigTimeout(): void
     {
         [$client, $httpClient] = TestClientFactory::create(
@@ -200,5 +223,25 @@ final class ClientTest extends TestCase
         } finally {
             putenv('BOOKURIER_TIMEOUT');
         }
+    }
+
+    public function testWithTimeoutRejectsForeignPsr18ClientTransport(): void
+    {
+        $foreign = new class implements ClientInterface {
+            public function sendRequest(RequestInterface $request): ResponseInterface
+            {
+                return new Response();
+            }
+        };
+        $factory = new HttpFactory();
+
+        $client = new Client($foreign, $factory, $factory, new ClientConfig(userId: 'user', password: 'pass'));
+
+        $client->withTimeout(null);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('ClientConfig::timeout cannot be applied to a foreign PSR-18 client; configure the timeout on that client or leave it null.');
+
+        $client->withTimeout(30.0);
     }
 }

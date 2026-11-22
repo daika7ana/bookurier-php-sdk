@@ -292,6 +292,7 @@ the AWB at the same index; `OrderReference::fromArray()` no longer exists.
 |---|---|
 | `Client::create(httpClient:, requestFactory:, streamFactory:, config:)` | Build a client with defaults; all arguments optional |
 | `getConfig(): ClientConfig` | Current configuration |
+| `withTimeout(?float $timeout): self` | New client sharing the transport and credentials, with a different timeout |
 | `setCredentials(string $userId, string $password): self` | Replace credentials and return the same client |
 | `createRequest(string $method, string $path): RequestInterface` | Build a PSR-7 request for a path under the configured base URL |
 | `post(string $endpoint, array $form = [], ?float $timeout = null): ResponseInterface` | Form POST with credentials; no body mapping |

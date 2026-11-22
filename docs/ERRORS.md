@@ -180,6 +180,8 @@ first 200 characters:
 Expected an AWB number. Got: "<body>".
 Expected an XML response. Got: "<body>".
 Expected "1" for success. Got: "<body>".
+Response XML has no <cmd> element. Got: "<body>".
+Response XML has no <cmd> elements. Got: "<body>".
 ```
 
 ## Catch All SDK Failures
