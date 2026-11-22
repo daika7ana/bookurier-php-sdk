@@ -15,6 +15,7 @@ final class XmlResponse
 {
     private function __construct(
         private DOMDocument $document,
+        private string $body,
     ) {}
 
     /**
@@ -38,7 +39,7 @@ final class XmlResponse
             throw UnexpectedResponseException::withBody('Expected an XML response.', $body);
         }
 
-        return new self($document);
+        return new self($document, $body);
     }
 
     /**
@@ -69,7 +70,7 @@ final class XmlResponse
         $element = $this->first('cmd');
 
         if ($element === null) {
-            throw new UnexpectedResponseException('Response XML has no <cmd> element.');
+            throw UnexpectedResponseException::withBody('Response XML has no <cmd> element.', $this->body);
         }
 
         return $this->flatten($element);
@@ -91,7 +92,7 @@ final class XmlResponse
         }
 
         if ($commands === []) {
-            throw new UnexpectedResponseException('Response XML has no <cmd> elements.');
+            throw UnexpectedResponseException::withBody('Response XML has no <cmd> elements.', $this->body);
         }
 
         return $commands;

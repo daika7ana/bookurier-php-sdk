@@ -57,9 +57,14 @@ final class XmlResponseTest extends TestCase
 
     public function testCmdThrowsWhenNoCommandExists(): void
     {
-        $this->expectException(UnexpectedResponseException::class);
+        try {
+            XmlResponse::from('<msg><err></err></msg>')->cmd();
 
-        XmlResponse::from('<msg><err></err></msg>')->cmd();
+            self::fail('Expected UnexpectedResponseException.');
+        } catch (UnexpectedResponseException $e) {
+            self::assertStringContainsString('Response XML has no <cmd> element.', $e->getMessage());
+            self::assertStringContainsString('Got: "<msg><err></err></msg>".', $e->getMessage());
+        }
     }
 
     public function testCommandsFlattensEveryCommand(): void
@@ -80,9 +85,14 @@ final class XmlResponseTest extends TestCase
 
     public function testCommandsThrowsWhenNoCommandExists(): void
     {
-        $this->expectException(UnexpectedResponseException::class);
+        try {
+            XmlResponse::from('<msg><err></err></msg>')->commands();
 
-        XmlResponse::from('<msg><err></err></msg>')->commands();
+            self::fail('Expected UnexpectedResponseException.');
+        } catch (UnexpectedResponseException $e) {
+            self::assertStringContainsString('Response XML has no <cmd> elements.', $e->getMessage());
+            self::assertStringContainsString('Got: "<msg><err></err></msg>".', $e->getMessage());
+        }
     }
 
     public function testTextReturnsTheTrimmedValue(): void
