@@ -8,11 +8,12 @@ response body to the resource method, which maps it to a typed value.
 Every resource method below can throw:
 
 - `Daika7ana\Bookurier\Exceptions\AuthenticationException` — `userId` or
-  `password` is empty; thrown before a request is sent.
+  `password` is empty (thrown before a request is sent), or Bookurier answered
+  `-1`.
 - `Daika7ana\Bookurier\Exceptions\TransportException` — the HTTP transport failed.
-- `Daika7ana\Bookurier\Exceptions\ApiException` — Bookurier answered a negative
-  code matching `/^-\d+$/`, or a non-empty `<err>` on an XML endpoint.
-- `Daika7ana\Bookurier\Exceptions\UnexpectedResponseException` — the body was
+- `Daika7ana\Bookurier\Exceptions\ValidationException` — Bookurier answered
+  `-2`, `-3` or `-5`, or a non-empty `<err>` on an XML endpoint.
+- `Daika7ana\Bookurier\Exceptions\UnexpectedStatusException` — the body was
   empty, could not be parsed, was a bot-filter challenge page, or was not the
   documented success value.
 
@@ -56,10 +57,12 @@ Creates one order and returns the generated AWB.
   (`062568455929`), or `CKC` plus six digits for Bucharest Today service `7`
   (`CKC122336`). The SDK treats the AWB as an opaque string and validates with
   the lenient `/^[A-Za-z]{0,4}\d{3,}$/`.
-- **Throws:** `AuthenticationException`, `ApiException`, `TransportException`,
-  `InvalidArgumentException` (no client code or empty district), and `UnexpectedResponseException`
+- **Throws:** `AuthenticationException`, `ValidationException`, `TransportException`,
+  `InvalidArgumentException` (no client code or empty district), and `UnexpectedStatusException`
   when the body is not a negative code and does not match the AWB pattern.
-  Negative codes raise `ApiException` naming the code (see [Errors](ERRORS.md)).
+  Negative codes raise `AuthenticationException` for `-1`, `ValidationException`
+  for `-2`, `-3` and `-5`, and `UnexpectedStatusException` for any other code
+  (see [Errors](ERRORS.md)).
 
 ```php
 $awb = $client->orders()->create(new Order(
@@ -84,13 +87,13 @@ Creates several orders in one call.
   `uniqueId` values. The resolved client code rules are the same as `create()`.
 - **Returns:** `Collection<int, OrderReference>` with one entry per order, in the
   order you sent them.
-- **Throws:** `AuthenticationException`, `ApiException`, `TransportException`,
-  `UnexpectedResponseException`, and `InvalidArgumentException` when `$orders` is
+- **Throws:** `AuthenticationException`, `ValidationException`, `TransportException`,
+  `UnexpectedStatusException`, and `InvalidArgumentException` when `$orders` is
   empty, two entries share a non-empty `uniqueId`, or no client code is available.
-- **Body handling:** a non-empty `<err>` raises `ApiException` (even when
+- **Body handling:** a non-empty `<err>` raises `ValidationException` (even when
   `<cmds>` is also present). Otherwise the API answers
   `<msg><cmds>BOK1,BOK2</cmds></msg>` — a comma separated list of AWBs with no
-  `unq` echoed. A missing `<cmds>` element raises `UnexpectedResponseException`
+  `unq` echoed. A missing `<cmds>` element raises `UnexpectedStatusException`
   before pairing, as does an AWB count that does not match the input list or a
   malformed AWB.
 
@@ -111,9 +114,10 @@ Deletes an order by AWB.
 - **Parameters:** `$awb` — the complete AWB.
 - **Returns:** `void`.
 - **Throws:** the four common exceptions listed above.
-- **Body handling:** Bookurier must answer `1`; a body matching `/^-\d+$/`
-  raises `ApiException`, and any other non-`1` body raises
-  `UnexpectedResponseException`.
+- **Body handling:** Bookurier must answer `1`. A negative body raises by code
+  (`-1` → `AuthenticationException`, `-2`/`-3`/`-5` → `ValidationException`, any
+  other code → `UnexpectedStatusException`); any other non-`1` body raises
+  `UnexpectedStatusException`.
 
 ### `deleteByUniqueId(string $uniqueId): void`
 
@@ -135,7 +139,7 @@ Returns the current status of an order.
 - **Parameters:** `$awb` — the complete AWB.
 - **Returns:** `OrderStatus`.
 - **Throws:** the four common exceptions listed above.
-- **Body handling:** parsed as XML. A non-empty `<err>` raises `ApiException`.
+- **Body handling:** parsed as XML. A non-empty `<err>` raises `ValidationException`.
 
 ### `statusByUniqueId(string $uniqueId): OrderStatus`
 
@@ -156,9 +160,9 @@ Returns every recorded status change for an order.
 - **Parameters:** `$awb` — the complete AWB.
 - **Returns:** `Collection<int, HistoryEntry>`.
 - **Throws:** the four common exceptions listed above.
-- **Body handling:** parsed as XML. A non-empty `<err>` raises `ApiException`.
+- **Body handling:** parsed as XML. A non-empty `<err>` raises `ValidationException`.
 - **Known limitation:** the live service answers `-2` on this endpoint even for a
-  valid AWB, so it raises `ApiException`. Use `historyByUniqueId()` instead.
+  valid AWB, so it raises `ValidationException`. Use `historyByUniqueId()` instead.
 
 ```php
 foreach ($client->orders()->history($awb) as $entry) {
@@ -195,9 +199,11 @@ Returns the AWB label as HTML.
 - **Parameters:** `$awb` — the complete AWB.
 - **Returns:** `Document` with the raw HTML body.
 - **Throws:** the four common exceptions listed above.
-- **Body handling:** a trimmed body matching `/^-\d+$/` raises `ApiException`; an
-  empty body or the host's HTML challenge page raises
-  `UnexpectedResponseException`. Any other body is returned as a `Document`.
+- **Body handling:** a trimmed body matching `/^-\d+$/` raises by code (`-1` →
+  `AuthenticationException`, `-2`/`-3`/`-5` → `ValidationException`, any other
+  code → `UnexpectedStatusException`); an empty body or the host's HTML challenge
+  page raises `UnexpectedStatusException`. Any other body is returned as a
+  `Document`.
 
 ### `pdf(string $awb): Document`
 
@@ -209,7 +215,7 @@ Returns the AWB label as PDF.
 - **Returns:** `Document` with the raw PDF body.
 - **Throws:** the four common exceptions listed above.
 - **Body handling:** same as `html()`, but the body must also begin with `%PDF`
-  after leading whitespace; otherwise `UnexpectedResponseException` is thrown.
+  after leading whitespace; otherwise `UnexpectedStatusException` is thrown.
   `Document::isPdf()` reflects the same check.
 
 ### `htmlByUniqueId(string $uniqueId): Document`

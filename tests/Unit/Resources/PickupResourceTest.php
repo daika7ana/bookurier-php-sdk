@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Daika7ana\Bookurier\Tests\Unit\Resources;
 
-use Daika7ana\Bookurier\Exceptions\ApiException;
+use Daika7ana\Bookurier\Exceptions\AuthenticationException;
 use Daika7ana\Bookurier\Tests\Support\Fixture;
 use Daika7ana\Bookurier\Tests\Support\TestClientFactory;
 use PHPUnit\Framework\TestCase;
@@ -32,11 +32,11 @@ final class PickupResourceTest extends TestCase
         self::assertFalse($document->isPdf());
     }
 
-    public function testMinusOneBecomesAnApiException(): void
+    public function testMinusOneBecomesAnAuthenticationException(): void
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response('-1'));
 
-        $this->expectException(ApiException::class);
+        $this->expectException(AuthenticationException::class);
 
         $client->pickup()->request();
     }

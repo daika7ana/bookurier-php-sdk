@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Daika7ana\Bookurier\Tests\Unit\Resources;
 
-use Daika7ana\Bookurier\Exceptions\ApiException;
-use Daika7ana\Bookurier\Exceptions\UnexpectedResponseException;
+use Daika7ana\Bookurier\Exceptions\AuthenticationException;
+use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
 use Daika7ana\Bookurier\Tests\Support\FakeHttpClient;
 use Daika7ana\Bookurier\Tests\Support\Fixture;
 use Daika7ana\Bookurier\Tests\Support\TestClientFactory;
@@ -42,7 +42,7 @@ final class LabelsResourceTest extends TestCase
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::html());
 
-        $this->expectException(UnexpectedResponseException::class);
+        $this->expectException(UnexpectedStatusException::class);
 
         $client->labels()->pdf('000112870071');
     }
@@ -51,7 +51,7 @@ final class LabelsResourceTest extends TestCase
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::html());
 
-        $this->expectException(UnexpectedResponseException::class);
+        $this->expectException(UnexpectedStatusException::class);
 
         $client->labels()->pdfByUniqueId('A4343244');
     }
@@ -91,11 +91,11 @@ final class LabelsResourceTest extends TestCase
         self::assertFalse($document->isPdf());
     }
 
-    public function testMinusOneBecomesAnApiException(): void
+    public function testMinusOneBecomesAnAuthenticationException(): void
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response('-1'));
 
-        $this->expectException(ApiException::class);
+        $this->expectException(AuthenticationException::class);
 
         $client->labels()->html('000112870071');
     }

@@ -95,7 +95,7 @@ file_put_contents("awb-{$awb}.pdf", $label->contents);
 
 `labels()->html($awb)` returns the HTML variant. `Document::isPdf()` sniffs the
 body for a `%PDF` header rather than trusting `Content-Type`. The SDK already
-rejects the host's bot-filter challenge page with `UnexpectedResponseException`,
+rejects the host's bot-filter challenge page with `UnexpectedStatusException`,
 and `pdf()` requires a `%PDF` body; the explicit check catches any other
 mislabeled response before you write a broken file.
 
@@ -132,21 +132,20 @@ Both return `void` and expect the body `1`.
 ## 7. Handle errors
 
 ```php
-use Daika7ana\Bookurier\Exceptions\ApiException;
 use Daika7ana\Bookurier\Exceptions\AuthenticationException;
 use Daika7ana\Bookurier\Exceptions\TransportException;
-use Daika7ana\Bookurier\Exceptions\UnexpectedResponseException;
+use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
+use Daika7ana\Bookurier\Exceptions\ValidationException;
 
 try {
     $awb = $client->orders()->create($order);
 } catch (AuthenticationException $e) {
-    // userId or password is empty; no request was sent.
-} catch (ApiException $e) {
-    // Bookurier answered a negative code (-1 rejected, -2 not found / invalid)
-    // or a non-empty <err>.
+    // userId or password is empty (nothing was sent), or Bookurier answered -1.
+} catch (ValidationException $e) {
+    // Bookurier answered -2, -3 or -5, or a non-empty <err>.
 } catch (TransportException $e) {
     // DNS, TLS, timeout or connection failure; getPrevious() holds the cause.
-} catch (UnexpectedResponseException $e) {
+} catch (UnexpectedStatusException $e) {
     // Empty, non-XML, non-AWB or bot-filter body.
 }
 ```

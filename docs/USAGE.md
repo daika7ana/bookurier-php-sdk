@@ -62,7 +62,9 @@ county and service: `BOK` plus seven digits (`BOK3925457`), twelve digits
 (`062568455929`), or `CKC` plus six digits for Bucharest Today
 (`CKC122336`). The SDK treats the AWB as an opaque string and validates with the
 lenient `/^[A-Za-z]{0,4}\d{3,}$/`. A body matching `/^-\d+$/` raises
-`ApiException`; any other non-AWB body raises `UnexpectedResponseException`.
+`AuthenticationException` for `-1`, `ValidationException` for `-2`, `-3` and
+`-5`, and `UnexpectedStatusException` for any other negative code or any other
+non-AWB body.
 
 ## Create Several Orders
 
@@ -96,8 +98,8 @@ client code throw `InvalidArgumentException` before any request is made.
 Bookurier answers the batch call with a comma separated AWB list
 (`<msg><cmds>BOK1,BOK2</cmds></msg>`) and does not echo your `unq`, so the SDK
 pairs each AWB with the order at the same position. A non-empty `<err>` raises
-`ApiException`; a missing `<cmds>`, mismatched counts, or a malformed AWB raises
-`UnexpectedResponseException` — check the daily label list before retrying,
+`ValidationException`; a missing `<cmds>`, mismatched counts, or a malformed AWB raises
+`UnexpectedStatusException` — check the daily label list before retrying,
 because the orders may already exist. The positional-pairing rule is documented
 canonically in [Resources](RESOURCES.md#createbatcharray-orders-collection).
 
@@ -147,8 +149,9 @@ $client->orders()->deleteByUniqueId('A1'); // by your order id
 ```
 
 Both methods return `void`. Bookurier must answer `1`; a body matching `/^-\d+$/`
-raises `ApiException`, and any other body is reported as
-`UnexpectedResponseException`.
+raises `AuthenticationException` for `-1` and `ValidationException` for `-2`,
+`-3` and `-5`; any other body, including another negative code, is reported as
+`UnexpectedStatusException`.
 
 ## Labels and Documents
 
@@ -174,7 +177,7 @@ in [DTOs](DTOS.md#document).
 
 `isPdf()` inspects the body, not `$mimeType`. The `pdf()` and `pdfByUniqueId()`
 methods reject a body that does not start with `%PDF` with
-`UnexpectedResponseException`; the check remains useful for any document you
+`UnexpectedStatusException`; the check remains useful for any document you
 receive through another path.
 
 ## Daily Labels, Bordero and Pickup

@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace Daika7ana\Bookurier\Support;
 
-use Daika7ana\Bookurier\Exceptions\UnexpectedResponseException;
+use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
 use DOMDocument;
 use DOMElement;
+use Psr\Http\Message\ResponseInterface;
 
 /**
  * Thin read-only wrapper over Bookurier's XML envelopes.
@@ -16,17 +17,18 @@ final class XmlResponse
     private function __construct(
         private DOMDocument $document,
         private string $body,
+        private ?ResponseInterface $response = null,
     ) {}
 
     /**
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
-    public static function from(string $body): self
+    public static function from(string $body, ?ResponseInterface $response = null): self
     {
         $body = str_starts_with($body, "\xEF\xBB\xBF") ? substr($body, 3) : $body;
 
         if (trim($body) === '') {
-            throw new UnexpectedResponseException('Bookurier returned an empty response.');
+            throw new UnexpectedStatusException($response, 'Bookurier returned an empty response.');
         }
 
         $document = new DOMDocument();
@@ -36,10 +38,10 @@ final class XmlResponse
         libxml_use_internal_errors($previous);
 
         if ($loaded === false) {
-            throw UnexpectedResponseException::withBody('Expected an XML response.', $body);
+            throw new UnexpectedStatusException($response, sprintf('Expected an XML response. Got: "%s".', substr($body, 0, 200)));
         }
 
-        return new self($document, $body);
+        return new self($document, $body, $response);
     }
 
     /**
@@ -63,14 +65,14 @@ final class XmlResponse
      *
      * @return array<string, string>
      *
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function cmd(): array
     {
         $element = $this->first('cmd');
 
         if ($element === null) {
-            throw UnexpectedResponseException::withBody('Response XML has no <cmd> element.', $this->body);
+            throw new UnexpectedStatusException($this->response, sprintf('Response XML has no <cmd> element. Got: "%s".', substr($this->body, 0, 200)));
         }
 
         return $this->flatten($element);
@@ -79,7 +81,7 @@ final class XmlResponse
     /**
      * @return list<array<string, string>>
      *
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function commands(): array
     {
@@ -92,7 +94,7 @@ final class XmlResponse
         }
 
         if ($commands === []) {
-            throw UnexpectedResponseException::withBody('Response XML has no <cmd> elements.', $this->body);
+            throw new UnexpectedStatusException($this->response, sprintf('Response XML has no <cmd> elements. Got: "%s".', substr($this->body, 0, 200)));
         }
 
         return $commands;

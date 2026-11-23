@@ -4,7 +4,23 @@ declare(strict_types=1);
 
 namespace Daika7ana\Bookurier\Exceptions;
 
+use Daika7ana\Bookurier\DTOs\Common\Errors\BookurierError;
+use Psr\Http\Message\ResponseInterface;
+use Throwable;
+
 /**
- * Thrown before sending a request when the credentials are missing.
+ * Thrown when the credentials are missing, or when Bookurier answers `-1`.
  */
-final class AuthenticationException extends BookurierException {}
+class AuthenticationException extends BookurierException
+{
+    public function __construct(
+        string $message = '',
+        int $code = 0,
+        ?Throwable $previous = null,
+        public readonly ?ResponseInterface $response = null,
+        public readonly ?int $retryAfter = null,
+        public readonly ?BookurierError $error = null,
+    ) {
+        parent::__construct($message, $response?->getStatusCode() ?? $code, $previous);
+    }
+}

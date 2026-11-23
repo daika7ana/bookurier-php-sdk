@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Daika7ana\Bookurier\Tests\Unit\Resources;
 
-use Daika7ana\Bookurier\Exceptions\UnexpectedResponseException;
+use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
 use Daika7ana\Bookurier\Tests\Support\Fixture;
 use Daika7ana\Bookurier\Tests\Support\TestClientFactory;
 use PHPUnit\Framework\TestCase;
@@ -32,11 +32,11 @@ final class ReportsResourceTest extends TestCase
         self::assertFalse($document->isPdf());
     }
 
-    public function testEmptyBodyBecomesAnUnexpectedResponseException(): void
+    public function testEmptyBodyBecomesAnUnexpectedStatusException(): void
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response(''));
 
-        $this->expectException(UnexpectedResponseException::class);
+        $this->expectException(UnexpectedStatusException::class);
 
         $client->reports()->dailyBordero();
     }

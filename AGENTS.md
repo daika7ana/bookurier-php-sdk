@@ -105,16 +105,22 @@ vendor/bin/pint     # the only way to auto-fix style
 - Every `msg` must be wrapped as `<msg>...</msg>`; the SDK always sends that
   envelope. A bare `<cmd>` without the wrapper is rejected with `-1` (or `-3` on
   label endpoints).
-- Error model is in-band while HTTP status is 200: a body matching `/^-\d+$/` is
-  `ApiException` naming the code — `-1` rejected request (bad credentials or
-  malformed `msg`), `-2` record not found or invalid data (unknown AWB), `-3`
-  incomplete request. A non-empty `<err>` on an XML-mapped
-  endpoint (`status`, `statusByUniqueId`, `history`, `historyByUniqueId`,
-  `createBatch`) is `ApiException` with the `<err>` text; on `createBatch` a
-  response without `<cmds>` is `UnexpectedResponseException`. Delete endpoints
-  expect `1`; `create` expects an AWB matching `/^[A-Za-z]{0,4}\d{3,}$/`;
-  challenge pages and empty or unparseable bodies are
-  `UnexpectedResponseException`. Status codes are never inspected.
+- Error model is in-band while HTTP status is 200: a body matching `/^-\d+$/`
+  raises `AuthenticationException` for `-1` and `ValidationException` for `-2`,
+  `-3` and `-5` (any other code raises `UnexpectedStatusException`), each
+  carrying a `BookurierError` that names the code and message. `-1` is a
+  rejected request (bad credentials or malformed `msg`), `-2` a record not found
+  or invalid data (unknown AWB), `-3` an incomplete request. A non-empty `<err>`
+  on an XML-mapped endpoint (`status`, `statusByUniqueId`, `history`,
+  `historyByUniqueId`, `createBatch`) raises `ValidationException` with the
+  `<err>` text; on `createBatch` a response without `<cmds>` raises
+  `UnexpectedStatusException`. Delete endpoints expect `1`; `create` expects an
+  AWB matching `/^[A-Za-z]{0,4}\d{3,}$/`; challenge pages and empty or
+  unparseable bodies raise `UnexpectedStatusException`. Transport failures raise
+  `TransportException` (implements `ClientExceptionInterface`). Precedence:
+  in-band code/`<err>` wins regardless of status; else a non-2xx status maps
+  `401` → `AuthenticationException`, `400`/`422` → `ValidationException`, other
+  non-2xx → `UnexpectedStatusException`; else the 2xx shape rules above apply.
 - XML tag mapping from `Order`: `uniqueId`→`unq`, `recipientName`→`recv`,
   `number`→`no`, `packages`→`packs`, `block`→`bl`, `entrance`→`ent`,
   `apartment`→`apt`, `exchangePackage`→`exchange_pack`,
@@ -147,7 +153,7 @@ vendor/bin/pint     # the only way to auto-fix style
   that DOM parsing normalizes.
 - The host has a bot filter: sustained request bursts return HTTP 200 with an HTML
   "One moment, please…" challenge page, which surfaces as
-  `UnexpectedResponseException` on every endpoint, document endpoints included.
+  `UnexpectedStatusException` on every endpoint, document endpoints included.
   Space live tests out; a blocked window clears after a few minutes.
 - Services are Romanian only (`ServiceType`), matching the plugin's service
   picker: `1` Bucharest 24h, `3` Metropolitan, `5` Extins, `7` Bucharest Today,
@@ -185,4 +191,15 @@ vendor/bin/pint     # the only way to auto-fix style
   `BOOKURIER_TEST_USERNAME`, `BOOKURIER_TEST_PASSWORD` and
   `BOOKURIER_TEST_CLIENT_ID` are set; creating an AWB also needs
   `BOOKURIER_TEST_ALLOW_WRITES=1`. It never runs in `composer ci`.
+- Smoke coverage: `SmokeTestCase` holds the credential skip, the sample order
+  and the 0.5 s pause the host bot filter needs. `ClientSmokeTest` covers the
+  write lifecycle (single order and two-order batch: create, status by AWB and
+  unique id, history by unique id, PDF labels by AWB and unique id, delete in a
+  `finally`; a failed delete fails the test). `OrderLookupSmokeTest` and
+  `ReportsSmokeTest` are read-only: status by AWB/unique id, history by unique
+  id, HTML/PDF labels and the daily bordero/labels; order-scoped tests skip
+  unless `BOOKURIER_TEST_AWB` or `BOOKURIER_TEST_UNIQUE_ID` is set.
+  `pickup()->request()` is never smoke-tested: it is `@experimental` and
+  dispatches a physical courier. There are no pickup-point or services
+  endpoints to check.
 - `composer ci` must pass before a change is done.

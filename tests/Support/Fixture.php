@@ -28,11 +28,11 @@ final class Fixture
         return self::response('1');
     }
 
-    public static function error(string $message = 'Invalid credentials'): ResponseInterface
+    public static function error(string $message = 'Invalid credentials', int $status = 200): ResponseInterface
     {
         $escaped = htmlspecialchars($message, ENT_QUOTES | ENT_XML1, 'UTF-8');
 
-        return self::response('<msg><cmd></cmd><err>' . $escaped . '</err></msg>', 'text/xml');
+        return self::response('<msg><cmd></cmd><err>' . $escaped . '</err></msg>', 'text/xml', $status);
     }
 
     public static function xml(string $body): ResponseInterface

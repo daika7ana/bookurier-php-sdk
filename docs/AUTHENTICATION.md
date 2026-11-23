@@ -80,10 +80,11 @@ place.
 
 ## Rejected requests
 
-Bookurier answers HTTP 200 and puts a negative code in the body; the SDK raises
-`ApiException` naming the code. `-1` is generic: it does not distinguish a wrong
-password from a bad payload. Check the credentials first, then the XML body. The
-per-code table lives in [Error Codes](ERRORS.md#error-codes).
+Bookurier answers HTTP 200 and puts a negative code in the body. The SDK raises
+`AuthenticationException` for `-1` and `ValidationException` for `-2`, `-3` and
+`-5`, naming the code. `-1` is generic: it does not distinguish a wrong password
+from a bad payload. Check the credentials first, then the XML body. The per-code
+table lives in [Error Codes](ERRORS.md#error-codes).
 
 ## Redaction
 

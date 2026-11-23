@@ -9,10 +9,10 @@ use Daika7ana\Bookurier\DTOs\Order\HistoryEntry;
 use Daika7ana\Bookurier\DTOs\Order\Order;
 use Daika7ana\Bookurier\DTOs\Order\OrderReference;
 use Daika7ana\Bookurier\DTOs\Order\OrderStatus;
-use Daika7ana\Bookurier\Exceptions\ApiException;
 use Daika7ana\Bookurier\Exceptions\AuthenticationException;
 use Daika7ana\Bookurier\Exceptions\TransportException;
-use Daika7ana\Bookurier\Exceptions\UnexpectedResponseException;
+use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
+use Daika7ana\Bookurier\Exceptions\ValidationException;
 use Daika7ana\Bookurier\Support\ResponseBody;
 use Daika7ana\Bookurier\Support\Xml;
 use Daika7ana\Bookurier\Support\XmlResponse;
@@ -20,8 +20,8 @@ use Daika7ana\SimpleCollections\Collection;
 
 final class OrdersResource
 {
-    // Two live shapes, chosen server-side by destination county: `BOK` + 7 digits
-    // (own network) or 12 bare digits (partner routes). Kept lenient on purpose.
+    // Three live shapes, chosen server-side: `BOK` + 7 digits, 12 bare digits on
+    // partner routes, or `CKC` + 6 digits. Kept lenient on purpose.
     private const AWB_PATTERN = '/^[A-Za-z]{0,4}\d{3,}$/';
 
     public function __construct(
@@ -31,21 +31,24 @@ final class OrdersResource
     /**
      * Creates one order and returns the generated AWB.
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function create(Order $order): string
     {
         $this->assertOrderRequirements($order);
 
-        $awb = ResponseBody::text(
-            $this->client->post('add_cmd.php', ['msg' => Xml::message($order->toXml($this->client->getConfig()->clientId))]),
-        );
+        $response = $this->client->post('add_cmd.php', ['msg' => Xml::message($order->toXml($this->client->getConfig()->clientId))]);
+        $awb = ResponseBody::text($response);
 
         if (preg_match(self::AWB_PATTERN, $awb) !== 1) {
-            throw UnexpectedResponseException::withBody('Expected an AWB number.', $awb);
+            throw new UnexpectedStatusException(
+                $response,
+                sprintf('Expected an AWB number. Got: "%s".', substr($awb, 0, 200)),
+                retryAfter: ResponseBody::retryAfter($response),
+            );
         }
 
         return $awb;
@@ -57,10 +60,10 @@ final class OrdersResource
      * @param list<Order> $orders
      * @return Collection<int, OrderReference>
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function createBatch(array $orders): Collection
     {
@@ -85,13 +88,16 @@ final class OrdersResource
             $commands .= $order->toXml($clientCode);
         }
 
-        $xml = ResponseBody::xml(
-            $this->client->post('add_cmds.php', ['msg' => Xml::message('<cmds>' . $commands . '</cmds>')]),
-        );
+        $response = $this->client->post('add_cmds.php', ['msg' => Xml::message('<cmds>' . $commands . '</cmds>')]);
+        $xml = ResponseBody::xml($response);
 
         $cmds = $xml->text('cmds');
         if ($cmds === null) {
-            throw new UnexpectedResponseException('Response XML has no <cmds> element.');
+            throw new UnexpectedStatusException(
+                $response,
+                'Response XML has no <cmds> element.',
+                retryAfter: ResponseBody::retryAfter($response),
+            );
         }
 
         // Live API answers <msg><cmds>BOK1,BOK2</cmds></msg>: a comma list, not <cmd> elements.
@@ -101,15 +107,21 @@ final class OrdersResource
         ));
 
         if (count($awbs) !== count($orders)) {
-            throw new UnexpectedResponseException(
+            throw new UnexpectedStatusException(
+                $response,
                 sprintf('Expected %d AWBs, got %d.', count($orders), count($awbs)),
+                retryAfter: ResponseBody::retryAfter($response),
             );
         }
 
         $references = [];
         foreach ($orders as $index => $order) {
             if (preg_match(self::AWB_PATTERN, $awbs[$index]) !== 1) {
-                throw new UnexpectedResponseException('Expected an AWB number.');
+                throw new UnexpectedStatusException(
+                    $response,
+                    'Expected an AWB number.',
+                    retryAfter: ResponseBody::retryAfter($response),
+                );
             }
 
             $references[] = new OrderReference($order->uniqueId, $awbs[$index]);
@@ -136,10 +148,10 @@ final class OrdersResource
     /**
      * Deletes an order by AWB.
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function delete(string $awb): void
     {
@@ -151,10 +163,10 @@ final class OrdersResource
     /**
      * Deletes an order by the caller's own identifier.
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function deleteByUniqueId(string $uniqueId): void
     {
@@ -166,10 +178,10 @@ final class OrdersResource
     /**
      * Current status of an order, looked up by AWB.
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function status(string $awb): OrderStatus
     {
@@ -183,10 +195,10 @@ final class OrdersResource
     /**
      * Current status of an order, looked up by the caller's own identifier.
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function statusByUniqueId(string $uniqueId): OrderStatus
     {
@@ -205,10 +217,10 @@ final class OrdersResource
      *
      * @return Collection<int, HistoryEntry>
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function history(string $awb): Collection
     {
@@ -224,10 +236,10 @@ final class OrdersResource
      *
      * @return Collection<int, HistoryEntry>
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function historyByUniqueId(string $uniqueId): Collection
     {

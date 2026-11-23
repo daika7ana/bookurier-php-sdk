@@ -93,19 +93,23 @@ final class OrdersResourceTest extends TestCase
 
 Every endpoint needs a test covering both the request (method, path, form fields,
 XML body) and the response mapping. `Fixture::error()` produces an in-band
-`<err>` envelope for `ApiException` tests; `Fixture::response('-1')` covers the
+`<err>` envelope for `ValidationException` tests; `Fixture::response('-1')` covers the
 scalar `-1` path.
 
 ## Live Smoke Tests
 
-`tests/Smoke` talks to the real Bookurier API. It is skipped unless the
-environment is configured:
+`tests/Smoke` talks to the real Bookurier API. It is skipped unless all three of
+`BOOKURIER_TEST_USERNAME`, `BOOKURIER_TEST_PASSWORD` and
+`BOOKURIER_TEST_CLIENT_ID` are set; creating a live AWB additionally needs
+`BOOKURIER_TEST_ALLOW_WRITES=1`.
 
 | Variable | Purpose |
 |---|---|
-| `BOOKURIER_TEST_USERNAME`, `BOOKURIER_TEST_PASSWORD` | Test account credentials; required to run anything |
-| `BOOKURIER_TEST_CLIENT_ID` | Client code sent as `<client>`; required to create an order |
+| `BOOKURIER_TEST_USERNAME`, `BOOKURIER_TEST_PASSWORD` | Test account credentials |
+| `BOOKURIER_TEST_CLIENT_ID` | Client code sent as `<client>`; the suite skips without it |
 | `BOOKURIER_TEST_ALLOW_WRITES` | Must be `1` to create and delete a live AWB |
+| `BOOKURIER_TEST_AWB` | An existing AWB for read-only status and label checks |
+| `BOOKURIER_TEST_UNIQUE_ID` | An existing order id for read-only status and history checks |
 
 ```bash
 BOOKURIER_TEST_USERNAME=... BOOKURIER_TEST_PASSWORD=... \
@@ -113,9 +117,12 @@ BOOKURIER_TEST_CLIENT_ID=... BOOKURIER_TEST_ALLOW_WRITES=1 \
 composer test:smoke
 ```
 
-The lifecycle test creates one order, checks status and that the PDF is a real
-PDF, and deletes the AWB in a `finally` block. Smoke tests never run in
-`composer ci`.
+The lifecycle test creates one order, checks status by AWB and unique id, the
+history and the PDF labels, then deletes the AWB in a `finally` block; the batch
+test does the same for two orders. Read-only tests cover the lookup endpoints
+against `BOOKURIER_TEST_AWB` / `BOOKURIER_TEST_UNIQUE_ID` and the daily
+bordero and labels. `pickup()->request()` is not tested: it is experimental and
+dispatches a physical courier. Smoke tests never run in `composer ci`.
 
 ## CI
 

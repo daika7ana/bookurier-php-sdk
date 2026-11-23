@@ -10,8 +10,9 @@ use Daika7ana\Bookurier\DTOs\Order\Order;
 use Daika7ana\Bookurier\DTOs\Order\OrderReference;
 use Daika7ana\Bookurier\DTOs\Order\OrderStatus;
 use Daika7ana\Bookurier\Enums\ServiceType;
-use Daika7ana\Bookurier\Exceptions\ApiException;
-use Daika7ana\Bookurier\Exceptions\UnexpectedResponseException;
+use Daika7ana\Bookurier\Exceptions\AuthenticationException;
+use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
+use Daika7ana\Bookurier\Exceptions\ValidationException;
 use Daika7ana\Bookurier\Tests\Support\FakeHttpClient;
 use Daika7ana\Bookurier\Tests\Support\Fixture;
 use Daika7ana\Bookurier\Tests\Support\TestClientFactory;
@@ -81,7 +82,7 @@ final class OrdersResourceTest extends TestCase
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response('not-an-awb'));
 
-        $this->expectException(UnexpectedResponseException::class);
+        $this->expectException(UnexpectedStatusException::class);
 
         $client->orders()->create($this->order(clientCode: 1234));
     }
@@ -129,7 +130,7 @@ final class OrdersResourceTest extends TestCase
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batch());
 
-        $this->expectException(UnexpectedResponseException::class);
+        $this->expectException(UnexpectedStatusException::class);
 
         $client->orders()->createBatch([
             $this->order(clientCode: 1234),
@@ -161,7 +162,7 @@ final class OrdersResourceTest extends TestCase
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response('0'));
 
-        $this->expectException(UnexpectedResponseException::class);
+        $this->expectException(UnexpectedStatusException::class);
 
         $client->orders()->delete('000112870071');
     }
@@ -243,43 +244,53 @@ final class OrdersResourceTest extends TestCase
      */
     public static function negativeCodes(): iterable
     {
-        yield '-1' => ['-1'];
         yield '-2' => ['-2'];
         yield '-3' => ['-3'];
     }
 
     #[DataProvider('negativeCodes')]
-    public function testNegativeCodesBecomeApiExceptions(string $code): void
+    public function testNegativeCodesBecomeValidationExceptions(string $code): void
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response($code));
 
         try {
             $client->orders()->status('000112234242');
 
-            self::fail('Expected ApiException.');
-        } catch (ApiException $e) {
+            self::fail('Expected ValidationException.');
+        } catch (ValidationException $e) {
             self::assertStringContainsString($code, $e->getMessage());
+            self::assertSame((int) $code, $e->error?->code);
+            self::assertNotNull($e->response);
         }
     }
 
-    public function testAnInBandErrorBecomesAnApiException(): void
+    public function testMinusOneBecomesAnAuthenticationException(): void
+    {
+        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response('-1'));
+
+        $this->expectException(AuthenticationException::class);
+
+        $client->orders()->status('000112234242');
+    }
+
+    public function testAnInBandErrorBecomesAValidationException(): void
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::error('AWB inexistent'));
 
         try {
             $client->orders()->history('000112234242');
 
-            self::fail('Expected ApiException.');
-        } catch (ApiException $e) {
+            self::fail('Expected ValidationException.');
+        } catch (ValidationException $e) {
             self::assertSame('AWB inexistent', $e->getMessage());
         }
     }
 
-    public function testEmptyBodyBecomesAnUnexpectedResponseException(): void
+    public function testEmptyBodyBecomesAnUnexpectedStatusException(): void
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response(''));
 
-        $this->expectException(UnexpectedResponseException::class);
+        $this->expectException(UnexpectedStatusException::class);
 
         $client->orders()->create($this->order(clientCode: 1234));
     }
@@ -291,8 +302,8 @@ final class OrdersResourceTest extends TestCase
         try {
             $client->orders()->createBatch([$this->order(clientCode: 1234), $this->order(uniqueId: 'UNQ-2', clientCode: 1234)]);
 
-            self::fail('Expected ApiException.');
-        } catch (ApiException $e) {
+            self::fail('Expected ValidationException.');
+        } catch (ValidationException $e) {
             self::assertSame('Batch rejected', $e->getMessage());
         }
     }
@@ -301,7 +312,7 @@ final class OrdersResourceTest extends TestCase
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batchWithError());
 
-        $this->expectException(ApiException::class);
+        $this->expectException(ValidationException::class);
 
         $client->orders()->createBatch([$this->order(clientCode: 1234), $this->order(uniqueId: 'UNQ-2', clientCode: 1234)]);
     }
@@ -310,7 +321,7 @@ final class OrdersResourceTest extends TestCase
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batchWithoutCmds());
 
-        $this->expectException(UnexpectedResponseException::class);
+        $this->expectException(UnexpectedStatusException::class);
 
         $client->orders()->createBatch([$this->order(clientCode: 1234)]);
     }
@@ -321,7 +332,7 @@ final class OrdersResourceTest extends TestCase
             static fn(): ResponseInterface => Fixture::xml('<msg><cmds>BOK0001,not-an-awb</cmds><err></err></msg>'),
         );
 
-        $this->expectException(UnexpectedResponseException::class);
+        $this->expectException(UnexpectedStatusException::class);
 
         $client->orders()->createBatch([$this->order(clientCode: 1234), $this->order(uniqueId: 'UNQ-2', clientCode: 1234)]);
     }
@@ -392,11 +403,11 @@ final class OrdersResourceTest extends TestCase
         $client->orders()->createBatch([$this->order(clientCode: 1234, district: '  ')]);
     }
 
-    public function testMinusFiveBecomesAApiException(): void
+    public function testMinusFiveBecomesAValidationException(): void
     {
         [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response('-5'));
 
-        $this->expectException(ApiException::class);
+        $this->expectException(ValidationException::class);
         $this->expectExceptionMessage('Bookurier returned -5: the service rejected the order (observed when <district> is missing or empty).');
 
         $client->orders()->create($this->order(clientCode: 1234));

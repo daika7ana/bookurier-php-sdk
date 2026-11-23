@@ -4,20 +4,18 @@ declare(strict_types=1);
 
 namespace Daika7ana\Bookurier\Tests\Smoke;
 
-use Daika7ana\Bookurier\Client;
-use Daika7ana\Bookurier\Config\ClientConfig;
-use Daika7ana\Bookurier\DTOs\Order\Order;
-use Daika7ana\Bookurier\Enums\ServiceType;
+use Daika7ana\Bookurier\DTOs\Order\OrderReference;
+use Daika7ana\SimpleCollections\Collection;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\TestCase;
+use Throwable;
 
 /**
- * Live API check. Skipped unless BOOKURIER_TEST_USERNAME,
+ * Live write check. Skipped unless BOOKURIER_TEST_USERNAME,
  * BOOKURIER_TEST_PASSWORD and BOOKURIER_TEST_CLIENT_ID are set; writes
  * additionally need BOOKURIER_TEST_ALLOW_WRITES=1.
  */
 #[Group('smoke')]
-final class ClientSmokeTest extends TestCase
+final class ClientSmokeTest extends SmokeTestCase
 {
     public function testCreateStatusPdfDelete(): void
     {
@@ -29,92 +27,96 @@ final class ClientSmokeTest extends TestCase
 
         try {
             $awb = $client->orders()->create($this->order($uniqueId));
-
             $this->assertMatchesRegularExpression('/^[A-Za-z]{0,4}\d{3,}$/', $awb);
+            $this->pause();
 
-            $status = $client->orders()->statusByUniqueId($uniqueId);
-            $this->assertSame($awb, $status->awb);
+            $byAwb = $client->orders()->status($awb);
+            $this->assertSame($awb, $byAwb->awb);
+            $this->assertNotSame('', $byAwb->statusDescription);
+            $this->pause();
+
+            $byUniqueId = $client->orders()->statusByUniqueId($uniqueId);
+            $this->assertSame($uniqueId, $byUniqueId->uniqueId);
+            $this->assertSame($awb, $byUniqueId->awb);
+            $this->pause();
+
+            $history = $client->orders()->historyByUniqueId($uniqueId);
+            $this->assertInstanceOf(Collection::class, $history);
+            foreach ($history as $entry) {
+                $this->assertSame($uniqueId, $entry->uniqueId);
+                $this->assertSame($awb, $entry->awb);
+            }
+            $this->pause();
 
             $this->assertTrue($client->labels()->pdf($awb)->isPdf());
+            $this->pause();
+
+            $this->assertTrue($client->labels()->pdfByUniqueId($uniqueId)->isPdf());
         } finally {
             if ($awb !== null) {
+                $this->pause();
                 $client->orders()->delete($awb);
             }
         }
     }
 
-    public function testStatusByUniqueId(): void
+    public function testCreateBatchAndDelete(): void
     {
         $this->requireWriteAccess();
 
         $client = $this->client();
-        $uniqueId = 'smoke-' . bin2hex(random_bytes(4));
-        $awb = null;
+        $uniqueIds = [
+            'smoke-' . bin2hex(random_bytes(4)),
+            'smoke-' . bin2hex(random_bytes(4)),
+        ];
+        $awbs = [];
 
         try {
-            $awb = $client->orders()->create($this->order($uniqueId));
+            $references = $client->orders()->createBatch([
+                $this->order($uniqueIds[0]),
+                $this->order($uniqueIds[1]),
+            ]);
 
-            $status = $client->orders()->statusByUniqueId($uniqueId);
-            $this->assertSame($uniqueId, $status->uniqueId);
-            $this->assertSame($awb, $status->awb);
+            $items = $references->all();
+            $awbs = array_map(
+                static fn(OrderReference $reference): string => $reference->awb,
+                $items,
+            );
+            $this->assertCount(2, $awbs);
+
+            foreach ($awbs as $index => $awb) {
+                $this->assertMatchesRegularExpression('/^[A-Za-z]{0,4}\d{3,}$/', $awb);
+                $this->assertSame($uniqueIds[$index], $items[$index]->uniqueId);
+            }
+
+            $this->pause();
+
+            $status = $client->orders()->statusByUniqueId($uniqueIds[1]);
+            $this->assertSame($awbs[1], $status->awb);
         } finally {
-            if ($awb !== null) {
-                $client->orders()->delete($awb);
+            $this->deleteAll($awbs);
+        }
+    }
+
+    /**
+     * @param list<string> $awbs
+     */
+    private function deleteAll(array $awbs): void
+    {
+        $failure = null;
+
+        foreach ($awbs as $awb) {
+            $this->pause();
+
+            try {
+                $this->client()->orders()->delete($awb);
+            } catch (Throwable $e) {
+                $failure ??= $e;
             }
         }
-    }
 
-    protected function setUp(): void
-    {
-        $username = getenv('BOOKURIER_TEST_USERNAME');
-        $password = getenv('BOOKURIER_TEST_PASSWORD');
-
-        if ($username === false || $username === '' || $password === false || $password === '') {
-            $this->markTestSkipped('BOOKURIER_TEST_USERNAME and BOOKURIER_TEST_PASSWORD must be set to run live smoke tests.');
+        if ($failure !== null) {
+            throw $failure;
         }
-
-        $clientId = getenv('BOOKURIER_TEST_CLIENT_ID');
-
-        if ($clientId === false || $clientId === '') {
-            $this->markTestSkipped('BOOKURIER_TEST_CLIENT_ID must be set: Bookurier requires a client code to create an order.');
-        }
-    }
-
-    private function requireWriteAccess(): void
-    {
-        if (getenv('BOOKURIER_TEST_ALLOW_WRITES') !== '1') {
-            $this->markTestSkipped('BOOKURIER_TEST_ALLOW_WRITES=1 is required: the smoke test creates a live AWB (and deletes it afterwards).');
-        }
-    }
-
-    private function client(): Client
-    {
-        return Client::create(config: new ClientConfig(
-            userId: (string) getenv('BOOKURIER_TEST_USERNAME'),
-            password: (string) getenv('BOOKURIER_TEST_PASSWORD'),
-            clientId: $this->clientId(),
-        ));
-    }
-
-    private function clientId(): ?int
-    {
-        $clientId = getenv('BOOKURIER_TEST_CLIENT_ID');
-
-        return $clientId === false || $clientId === '' ? null : (int) $clientId;
-    }
-
-    private function order(string $uniqueId): Order
-    {
-        return new Order(
-            uniqueId: $uniqueId,
-            recipientName: 'Smoke Test',
-            phone: '0722123456',
-            city: 'București',
-            district: 'Sector 1',
-            street: 'Strada Testului',
-            number: '1',
-            service: ServiceType::National24,
-            weight: 0.5,
-        );
     }
 }

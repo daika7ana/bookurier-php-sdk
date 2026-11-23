@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Daika7ana\Bookurier\Resources;
 
 use Daika7ana\Bookurier\Client;
-use Daika7ana\Bookurier\Exceptions\ApiException;
 use Daika7ana\Bookurier\Exceptions\AuthenticationException;
 use Daika7ana\Bookurier\Exceptions\TransportException;
-use Daika7ana\Bookurier\Exceptions\UnexpectedResponseException;
+use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
+use Daika7ana\Bookurier\Exceptions\ValidationException;
 use Daika7ana\Bookurier\Support\Document;
 use Daika7ana\Bookurier\Support\ResponseBody;
 
@@ -21,10 +21,10 @@ final class ReportsResource
     /**
      * The daily order list (bordero), as HTML.
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function dailyBordero(): Document
     {

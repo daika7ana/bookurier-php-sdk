@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Daika7ana\Bookurier\Resources;
 
 use Daika7ana\Bookurier\Client;
-use Daika7ana\Bookurier\Exceptions\ApiException;
 use Daika7ana\Bookurier\Exceptions\AuthenticationException;
 use Daika7ana\Bookurier\Exceptions\TransportException;
-use Daika7ana\Bookurier\Exceptions\UnexpectedResponseException;
+use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
+use Daika7ana\Bookurier\Exceptions\ValidationException;
 use Daika7ana\Bookurier\Support\Document;
 use Daika7ana\Bookurier\Support\ResponseBody;
 use Daika7ana\Bookurier\Support\Xml;
@@ -22,10 +22,10 @@ final class LabelsResource
     /**
      * AWB label as HTML, by AWB.
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function html(string $awb): Document
     {
@@ -37,10 +37,10 @@ final class LabelsResource
     /**
      * AWB label as PDF, by AWB.
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function pdf(string $awb): Document
     {
@@ -53,10 +53,10 @@ final class LabelsResource
     /**
      * AWB label as HTML, by the caller's own identifier.
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function htmlByUniqueId(string $uniqueId): Document
     {
@@ -68,10 +68,10 @@ final class LabelsResource
     /**
      * AWB label as PDF, by the caller's own identifier.
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function pdfByUniqueId(string $uniqueId): Document
     {
@@ -84,10 +84,10 @@ final class LabelsResource
     /**
      * Labels for every order of the day, in one HTML document.
      *
-     * @throws ApiException
+     * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
-     * @throws UnexpectedResponseException
+     * @throws UnexpectedStatusException
      */
     public function daily(): Document
     {

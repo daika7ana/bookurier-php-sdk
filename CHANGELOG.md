@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-11-23
+
+### Added
+
+- Live smoke suite now covers read-only lookups, daily reports and labels, and batch creation, deleting every created AWB.
+
+- `DTOs\Common\Errors\BookurierError` describes the in-band error (code, message, raw payload) and classifies it with `isValidationRelated()` / `isAuthenticationRelated()`.
+- `UnexpectedStatusException` and `ValidationException` for body-level failures, alongside `AuthenticationException`.
+
+### Breaking
+
+- A non-2xx response whose body carries no in-band signal now raises by status: `401` → `AuthenticationException`, `400`/`422` → `ValidationException`, any other non-2xx → `UnexpectedStatusException`; in-band codes and `<err>` still win.
+
+### Changed
+
+- `BookurierException` extends `Exception` instead of `RuntimeException`.
+- `-1` raises `AuthenticationException`; `-2`, `-3`, `-5` and a non-empty `<err>` raise `ValidationException`; unexpected bodies raise `UnexpectedStatusException`.
+- The body-level exceptions expose `$response`, `$retryAfter` and `$error`.
+- `$e->getCode()` on the body-level exceptions is now the HTTP status when a response exists, else `0`; the in-band code stays on `$e->error->code`.
+- Response shape errors (`UnexpectedStatusException` from malformed or empty XML) now carry the response.
+
+### Removed
+
+- `ApiException` and `UnexpectedResponseException`; catch `ValidationException` and `UnexpectedStatusException` instead.
+
 ## [1.1.0] - 2026-11-22
 
 ### Added

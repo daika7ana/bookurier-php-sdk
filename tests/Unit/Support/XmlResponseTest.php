@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace Daika7ana\Bookurier\Tests\Unit\Support;
 
-use Daika7ana\Bookurier\Exceptions\UnexpectedResponseException;
+use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
 use Daika7ana\Bookurier\Support\XmlResponse;
+use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 
 final class XmlResponseTest extends TestCase
@@ -19,7 +20,7 @@ final class XmlResponseTest extends TestCase
 
     public function testFromRejectsEmptyBody(): void
     {
-        $this->expectException(UnexpectedResponseException::class);
+        $this->expectException(UnexpectedStatusException::class);
 
         XmlResponse::from('  ');
     }
@@ -29,9 +30,21 @@ final class XmlResponseTest extends TestCase
         try {
             XmlResponse::from('<msg><cmd>');
 
-            self::fail('Expected UnexpectedResponseException.');
-        } catch (UnexpectedResponseException $e) {
+            self::fail('Expected UnexpectedStatusException.');
+        } catch (UnexpectedStatusException $e) {
             self::assertStringContainsString('Expected an XML response.', $e->getMessage());
+        }
+    }
+
+    public function testShapeErrorsCarryTheResponse(): void
+    {
+        try {
+            XmlResponse::from('<msg><cmd>', new Response(502));
+
+            self::fail('Expected UnexpectedStatusException.');
+        } catch (UnexpectedStatusException $e) {
+            self::assertSame(502, $e->response?->getStatusCode());
+            self::assertSame(502, $e->getCode());
         }
     }
 
@@ -60,8 +73,8 @@ final class XmlResponseTest extends TestCase
         try {
             XmlResponse::from('<msg><err></err></msg>')->cmd();
 
-            self::fail('Expected UnexpectedResponseException.');
-        } catch (UnexpectedResponseException $e) {
+            self::fail('Expected UnexpectedStatusException.');
+        } catch (UnexpectedStatusException $e) {
             self::assertStringContainsString('Response XML has no <cmd> element.', $e->getMessage());
             self::assertStringContainsString('Got: "<msg><err></err></msg>".', $e->getMessage());
         }
@@ -88,8 +101,8 @@ final class XmlResponseTest extends TestCase
         try {
             XmlResponse::from('<msg><err></err></msg>')->commands();
 
-            self::fail('Expected UnexpectedResponseException.');
-        } catch (UnexpectedResponseException $e) {
+            self::fail('Expected UnexpectedStatusException.');
+        } catch (UnexpectedStatusException $e) {
             self::assertStringContainsString('Response XML has no <cmd> elements.', $e->getMessage());
             self::assertStringContainsString('Got: "<msg><err></err></msg>".', $e->getMessage());
         }

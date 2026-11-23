@@ -43,7 +43,7 @@ API request — there is no API key, OAuth exchange or token refresh.
 - ✅ **XML Built and Parsed Internally** — Order payloads are escaped and wrapped for you; the API's `<cmd>` envelopes are mapped to DTOs
 - ✅ **All 15 Vendor Endpoints** — Create, batch create, delete, status, history, labels, daily bordero and pickup
 - ✅ **Byte-Exact Documents** — HTML and PDF labels, daily bordero documents and pickup borderos are returned as the raw response body, not re-encoded
-- ✅ **In-Band Error Mapping** — HTTP 200 error bodies (`-1`, `-2`, `-3`) become `ApiException`; authentication, transport and unexpected bodies have their own exception types
+- ✅ **In-Band Error Mapping** — HTTP 200 error bodies (`-1`, `-2`, `-3`, `-5`) become `AuthenticationException` or `ValidationException`; transport and unexpected bodies have their own exception types
 - ✅ **Opaque AWB Formats** — `BOK` plus seven digits, twelve digits on partner routes, or `CKC` plus six digits for Bucharest Today; all are treated as opaque strings and validated leniently
 - ✅ **Document Guards** — PDF labels must start with `%PDF`; the host's HTML challenge page and empty bodies are rejected
 - ✅ **Static Analysis with PHPStan** — Level 8 over the `src/` codebase
@@ -199,21 +199,21 @@ objects.
 ### Error Handling
 
 ```php
-use Daika7ana\Bookurier\Exceptions\ApiException;
 use Daika7ana\Bookurier\Exceptions\AuthenticationException;
 use Daika7ana\Bookurier\Exceptions\BookurierException;
 use Daika7ana\Bookurier\Exceptions\TransportException;
-use Daika7ana\Bookurier\Exceptions\UnexpectedResponseException;
+use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
+use Daika7ana\Bookurier\Exceptions\ValidationException;
 
 try {
     $awb = $client->orders()->create($order);
 } catch (AuthenticationException $e) {
-    // userId or password is empty; no request was sent
-} catch (ApiException $e) {
-    // Bookurier answered a negative code or a non-empty <err>
+    // userId or password is empty (nothing was sent), or Bookurier answered -1
+} catch (ValidationException $e) {
+    // Bookurier answered -2, -3 or -5, or a non-empty <err>
 } catch (TransportException $e) {
     // DNS, TLS, timeout or connection failure; original is getPrevious()
-} catch (UnexpectedResponseException $e) {
+} catch (UnexpectedStatusException $e) {
     // body was empty, not XML where XML was expected, not the success value,
     // or the host's HTML challenge page
 } catch (BookurierException $e) {
@@ -222,7 +222,8 @@ try {
 ```
 
 Bookurier returns HTTP 200 even for errors, so the SDK classifies responses by
-body rather than status code. See [docs/ERRORS.md](docs/ERRORS.md).
+body first; a non-2xx status is the fallback (401 → authentication, 400/422 →
+validation). See [docs/ERRORS.md](docs/ERRORS.md).
 
 ### Documentation Limits
 
@@ -237,7 +238,8 @@ documentation:
   The SDK treats the AWB as an opaque string and validates with the lenient
   `/^[A-Za-z]{0,4}\d{3,}$/`.
 - Failures are negative codes in a HTTP 200 body: `-1` rejected request, `-2`
-  record not found / invalid data, `-3` incomplete request.
+  record not found / invalid data, `-3` incomplete request, `-5` rejected
+  order (for example a missing `<district>`).
 - `add_cmd.php` requires `<client>` (your client code).
 - Every `msg` must be wrapped in `<msg>…</msg>`; the SDK always sends that
   envelope, and a bare `<cmd>` without the wrapper is rejected with `-1`.
@@ -249,7 +251,7 @@ documentation:
 - The host sits behind a bot filter: a burst of requests eventually gets an HTML
   "One moment, please…" challenge page with HTTP 200 instead of the API answer.
   Every endpoint, including the document endpoints, surfaces that as
-  `UnexpectedResponseException`; wait a few minutes before retrying reads, and
+  `UnexpectedStatusException`; wait a few minutes before retrying reads, and
   reconcile `create()` / `createBatch()` before retrying them.
 
 `pickup()->request()` (`@experimental`) dispatches a physical courier and was
