@@ -35,7 +35,7 @@ final class Psr18HttpClientAdapter implements HttpClientInterface
         } catch (TransportException $e) {
             throw $e;
         } catch (ClientExceptionInterface $e) {
-            throw new TransportException($e->getMessage(), (int) $e->getCode(), $e);
+            throw new TransportException($e->getMessage(), (int) $e->getCode(), previous: $e);
         }
     }
 }

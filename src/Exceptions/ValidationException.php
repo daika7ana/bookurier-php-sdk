@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Daika7ana\Bookurier\Exceptions;
 
 use Daika7ana\Bookurier\DTOs\Common\Errors\BookurierError;
-use Exception;
+use Throwable;
 use Psr\Http\Message\ResponseInterface;
 
 /**
@@ -17,10 +17,10 @@ class ValidationException extends BookurierException
      * @param array<string, string[]> $errors
      */
     public function __construct(
-        public readonly array $errors,
+        public readonly array $errors = [],
         string $message = '',
         int $code = 0,
-        ?Exception $previous = null,
+        ?Throwable $previous = null,
         public readonly ?ResponseInterface $response = null,
         public readonly ?int $retryAfter = null,
         public readonly ?BookurierError $error = null,

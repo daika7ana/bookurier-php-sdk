@@ -172,7 +172,7 @@ final class ResponseBody
         }
 
         if ($status === 400 || $status === 422) {
-            throw new ValidationException([], $message, response: $response, retryAfter: $retryAfter);
+            throw new ValidationException(message: $message, response: $response, retryAfter: $retryAfter);
         }
 
         throw new UnexpectedStatusException($response, $message, retryAfter: $retryAfter);

@@ -52,7 +52,10 @@ final class ClientTest extends TestCase
 
     public function testMissingCredentialsAreRejectedBeforeSending(): void
     {
-        [$client, $httpClient] = TestClientFactory::create(config: new ClientConfig());
+        [$client, $httpClient] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::response(''),
+            config: new ClientConfig(),
+        );
 
         try {
             $client->post('add_cmd.php');
@@ -88,6 +91,7 @@ final class ClientTest extends TestCase
     public function testConfigTimeoutReachesTheTransport(): void
     {
         [$client, $httpClient] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::response(''),
             config: new ClientConfig(userId: 'user', password: 'pass', timeout: 7.5),
         );
 
@@ -99,6 +103,7 @@ final class ClientTest extends TestCase
     public function testWithTimeoutDerivesAClientSharingTransportAndCredentials(): void
     {
         [$client, $httpClient] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::response(''),
             config: new ClientConfig(userId: 'user', password: 'pass', timeout: 10.0),
         );
 
@@ -122,6 +127,7 @@ final class ClientTest extends TestCase
     public function testPerCallTimeoutOverridesTheConfigTimeout(): void
     {
         [$client, $httpClient] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::response(''),
             config: new ClientConfig(userId: 'user', password: 'pass', timeout: 7.5),
         );
 
@@ -133,6 +139,7 @@ final class ClientTest extends TestCase
     public function testCustomBaseUrlIsHonoured(): void
     {
         [$client, $httpClient] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::response(''),
             config: new ClientConfig(userId: 'user', password: 'pass', baseUrl: 'https://example.test/api/'),
         );
 
@@ -144,7 +151,10 @@ final class ClientTest extends TestCase
 
     public function testSetCredentialsReplacesTheConfig(): void
     {
-        [$client] = TestClientFactory::create(config: new ClientConfig());
+        [$client] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::response(''),
+            config: new ClientConfig(),
+        );
 
         $result = $client->setCredentials('new-user', 'new-pass');
 
@@ -155,7 +165,7 @@ final class ClientTest extends TestCase
 
     public function testResourcesAreSharedInstances(): void
     {
-        [$client] = TestClientFactory::create();
+        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response(''));
 
         self::assertSame($client->orders(), $client->orders());
         self::assertSame($client->labels(), $client->labels());
@@ -165,7 +175,7 @@ final class ClientTest extends TestCase
 
     public function testSendDoesNotInjectCredentialsIntoACallerRequest(): void
     {
-        [$client, $httpClient] = TestClientFactory::create();
+        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response(''));
 
         $request = $client->createRequest('POST', 'get_stat.php')
             ->withBody((new HttpFactory())->createStream('msg=%3Cmsg%3E%3C%2Fmsg%3E'));

@@ -141,7 +141,7 @@ final class OrdersResourceTest extends TestCase
 
     public function testCreateBatchRejectsAnEmptyList(): void
     {
-        [$client] = TestClientFactory::create();
+        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response(''));
 
         $this->expectException(\InvalidArgumentException::class);
 

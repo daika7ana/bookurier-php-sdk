@@ -7,14 +7,16 @@ namespace Daika7ana\Bookurier\Tests\Support;
 use Daika7ana\Bookurier\Client;
 use Daika7ana\Bookurier\Config\ClientConfig;
 use GuzzleHttp\Psr7\HttpFactory;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
 
 final class TestClientFactory
 {
     /**
-     * @param (callable(\Psr\Http\Message\RequestInterface): \Psr\Http\Message\ResponseInterface)|null $handler
+     * @param callable(RequestInterface): ResponseInterface $handler
      * @return array{Client, FakeHttpClient}
      */
-    public static function create(?callable $handler = null, ?ClientConfig $config = null): array
+    public static function create(callable $handler, ?ClientConfig $config = null): array
     {
         $httpClient = new FakeHttpClient($handler);
         $psr17Factory = new HttpFactory();
