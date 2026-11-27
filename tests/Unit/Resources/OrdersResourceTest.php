@@ -5,451 +5,327 @@ declare(strict_types=1);
 namespace Daika7ana\Bookurier\Tests\Unit\Resources;
 
 use Daika7ana\Bookurier\Config\ClientConfig;
-use Daika7ana\Bookurier\DTOs\Order\HistoryEntry;
+use Daika7ana\Bookurier\DTOs\Order\HistoryEvent;
 use Daika7ana\Bookurier\DTOs\Order\Order;
 use Daika7ana\Bookurier\DTOs\Order\OrderReference;
-use Daika7ana\Bookurier\DTOs\Order\OrderStatus;
 use Daika7ana\Bookurier\Enums\ServiceType;
+use Daika7ana\Bookurier\Enums\Status;
 use Daika7ana\Bookurier\Exceptions\AuthenticationException;
 use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
 use Daika7ana\Bookurier\Exceptions\ValidationException;
 use Daika7ana\Bookurier\Tests\Support\FakeHttpClient;
 use Daika7ana\Bookurier\Tests\Support\Fixture;
 use Daika7ana\Bookurier\Tests\Support\TestClientFactory;
-use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
 
 final class OrdersResourceTest extends TestCase
 {
-    public function testCreatePostsTheOrderAndReturnsTheAwb(): void
-    {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::awb());
-        $order = $this->order(clientCode: 1234);
-
-        $awb = $client->orders()->create($order);
-
-        self::assertSame('BOK3925457', $awb);
-        $this->assertRequest($httpClient, 'add_cmd.php');
-        self::assertSame(
-            '<msg><cmd><client>1234</client><unq>UNQ-1</unq><recv>Ion Popescu</recv><phone>0712345678</phone>'
-            . '<country>Romania</country><city>Bucharest</city><district>Sect 1</district><street>Piața Unirii</street>'
-            . '<no>10</no><service>2</service><packs>2</packs><exchange_pack>0</exchange_pack>'
-            . '<weight>2.5</weight><confirmation>0</confirmation><ret_doc>0</ret_doc></cmd></msg>',
-            $this->form($httpClient)['msg'],
-        );
-    }
-
-    public function testCreateSendsTheConfiguredClientCode(): void
+    public function testCreatePostsTheOrderAndReturnsTheMappedAwb(): void
     {
         [$client, $httpClient] = TestClientFactory::create(
-            static fn(): ResponseInterface => Fixture::awb(),
-            new ClientConfig(userId: 'test-user', password: 'test-password', clientId: 1234),
+            static fn(): ResponseInterface => Fixture::addSuccess(),
+            new ClientConfig(userId: 'test-user', password: 'test-password', pickupPoint: '5'),
         );
 
-        $client->orders()->create($this->order());
+        $awb = $client->orders()->create($this->order());
 
-        self::assertStringContainsString('<client>1234</client>', $this->form($httpClient)['msg']);
+        self::assertSame('BOK6000123456', $awb);
+        $this->assertJsonPost($httpClient, 'add_cmds.php');
+
+        $body = $httpClient->lastJson();
+        self::assertSame('test-user', $body['user']);
+        self::assertSame('test-password', $body['pwd']);
+        self::assertSame([[
+            'pickup_point' => '5',
+            'unq' => 'CMD-10001',
+            'recv' => 'Ion Popescu',
+            'phone' => '0744555555',
+            'country' => 'Romania',
+            'district' => 'Hunedoara',
+            'city' => 'Deva',
+            'zip' => '330020',
+            'street' => 'Unirii',
+            'no' => '1',
+            'service' => 9,
+            'packs' => 1,
+            'weight' => 1.5,
+            'ret_doc' => 0,
+            'weekend' => 0,
+            'unpack' => 0,
+            'exchange_pack' => 0,
+            'confirmation' => 0,
+        ]], $body['data']);
     }
 
-    public function testCreatePrefersTheOrderClientCodeOverTheConfig(): void
+    public function testCreatePrefersTheOrderPickupPointOverTheConfig(): void
     {
         [$client, $httpClient] = TestClientFactory::create(
-            static fn(): ResponseInterface => Fixture::awb(),
-            new ClientConfig(userId: 'test-user', password: 'test-password', clientId: 1234),
+            static fn(): ResponseInterface => Fixture::addSuccess(),
+            new ClientConfig(userId: 'test-user', password: 'test-password', pickupPoint: '5'),
         );
 
-        $client->orders()->create($this->order(clientCode: 9999));
+        $client->orders()->create($this->order(pickupPoint: '7'));
 
-        $msg = $this->form($httpClient)['msg'];
-        self::assertStringContainsString('<client>9999</client>', $msg);
-        self::assertStringNotContainsString('<client>1234</client>', $msg);
+        self::assertSame('7', $httpClient->lastJson()['data'][0]['pickup_point']);
     }
 
-    public function testCreateBatchSendsTheConfiguredClientCode(): void
+    public function testCreateFallsBackToTheFirstAwbWhenTheMapIsMissing(): void
     {
-        [$client, $httpClient] = TestClientFactory::create(
-            static fn(): ResponseInterface => Fixture::batch(),
-            new ClientConfig(userId: 'test-user', password: 'test-password', clientId: 1234),
+        [$client] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::addSuccessWithoutMap(),
+            new ClientConfig(userId: 'test-user', password: 'test-password', pickupPoint: '5'),
         );
 
-        $client->orders()->createBatch([$this->order(), $this->order(uniqueId: 'UNQ-2')]);
-
-        self::assertSame(2, substr_count($this->form($httpClient)['msg'], '<client>1234</client>'));
+        self::assertSame('BOK6000123456', $client->orders()->create($this->order()));
     }
 
-    public function testCreateRejectsANonNumericAwb(): void
+    public function testCreateThrowsThePerOrderError(): void
     {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response('not-an-awb'));
+        [$client] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::orderError('Judet invalid', 'Verificati judetul.'),
+            new ClientConfig(userId: 'test-user', password: 'test-password', pickupPoint: '5'),
+        );
 
-        $this->expectException(UnexpectedStatusException::class);
+        try {
+            $client->orders()->create($this->order());
 
-        $client->orders()->create($this->order(clientCode: 1234));
+            self::fail('Expected ValidationException.');
+        } catch (ValidationException $e) {
+            self::assertSame('Judet invalid Verificati judetul.', $e->getMessage());
+        }
+    }
+
+    public function testCreateRequiresAPickupPoint(): void
+    {
+        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::addSuccess());
+
+        try {
+            $client->orders()->create($this->order());
+
+            self::fail('Expected InvalidArgumentException.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('BOOKURIER_PICKUP_POINT', $e->getMessage());
+        }
+
+        self::assertNull($httpClient->lastRequest);
+    }
+
+    public function testCreateRequiresADistrict(): void
+    {
+        [$client] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::addSuccess(),
+            new ClientConfig(userId: 'test-user', password: 'test-password', pickupPoint: '5'),
+        );
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Bookurier requires a district (sector or county): set Order::$district.');
+
+        $client->orders()->create($this->order(district: ''));
     }
 
     public function testCreateBatchPostsAllOrdersAndMapsTheReferences(): void
     {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batch());
-        $first = $this->order(clientCode: 1234);
-        $second = $this->order(uniqueId: 'UNQ-2', clientCode: 1234);
-
-        $references = $client->orders()->createBatch([$first, $second]);
-
-        $this->assertRequest($httpClient, 'add_cmds.php');
-        self::assertSame(
-            '<msg><cmds>' . $first->toXml() . $second->toXml() . '</cmds></msg>',
-            $this->form($httpClient)['msg'],
+        [$client, $httpClient] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::batchSuccess(),
+            new ClientConfig(userId: 'test-user', password: 'test-password', pickupPoint: '5'),
         );
 
-        self::assertCount(2, $references);
-        $items = $references->all();
-        self::assertInstanceOf(OrderReference::class, $items[0]);
-        self::assertSame($first->uniqueId, $items[0]->uniqueId);
-        self::assertSame('BOK0001', $items[0]->awb);
-        self::assertSame($second->uniqueId, $items[1]->uniqueId);
-        self::assertSame('BOK0002', $items[1]->awb);
-    }
-
-    public function testCreateBatchMapsMixedAwbShapesPositionally(): void
-    {
-        // Live batch of a Bucharest order (own network) and a Cluj order (partner route).
-        [$client] = TestClientFactory::create(
-            static fn(): ResponseInterface => Fixture::xml('<msg><cmds>BOK3925647,062568457893</cmds></msg>'),
-        );
-
-        $references = $client->orders()->createBatch([
-            $this->order(clientCode: 1234),
-            $this->order(uniqueId: 'UNQ-2', clientCode: 1234),
-        ])->all();
-
-        self::assertSame('BOK3925647', $references[0]->awb);
-        self::assertSame('062568457893', $references[1]->awb);
-    }
-
-    public function testCreateBatchRejectsAnAwbCountMismatch(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batch());
-
-        $this->expectException(UnexpectedStatusException::class);
-
-        $client->orders()->createBatch([
-            $this->order(clientCode: 1234),
-            $this->order(uniqueId: 'UNQ-2', clientCode: 1234),
-            $this->order(uniqueId: 'UNQ-3', clientCode: 1234),
+        $result = $client->orders()->createBatch([
+            $this->order(),
+            $this->order(uniqueId: 'CMD-10002'),
         ]);
+
+        $this->assertJsonPost($httpClient, 'add_cmds.php');
+        self::assertCount(2, $httpClient->lastJson()['data']);
+        self::assertFalse($result->hasErrors());
+        self::assertCount(2, $result->references());
+
+        $references = $result->references()->all();
+        self::assertInstanceOf(OrderReference::class, $references[0]);
+        self::assertSame('CMD-10001', $references[0]->uniqueId);
+        self::assertSame('BOK6000123456', $references[0]->awb);
+        self::assertSame('CMD-10002', $references[1]->uniqueId);
+        self::assertSame('BOK6000123457', $references[1]->awb);
+    }
+
+    public function testCreateBatchSurfacesPartialSuccess(): void
+    {
+        [$client] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::batchPartial(),
+            new ClientConfig(userId: 'test-user', password: 'test-password', pickupPoint: '5'),
+        );
+
+        $result = $client->orders()->createBatch([
+            $this->order(),
+            $this->order(uniqueId: 'CMD-10002'),
+        ]);
+
+        self::assertTrue($result->hasErrors());
+        self::assertCount(1, $result->references());
+        self::assertSame('CMD-10001', $result->references()->all()[0]->uniqueId);
+
+        $errors = $result->errors()->all();
+        self::assertCount(1, $errors);
+        self::assertSame('CMD-10002', $errors[0]->order);
+        self::assertSame('Judet invalid', $errors[0]->message);
+        self::assertSame('Verificati judetul.', $errors[0]->suggestion);
+    }
+
+    public function testCreateBatchRejectsDuplicateUniqueIds(): void
+    {
+        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batchSuccess());
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        try {
+            $client->orders()->createBatch([$this->order(), $this->order()]);
+        } finally {
+            self::assertNull($httpClient->lastRequest);
+        }
     }
 
     public function testCreateBatchRejectsAnEmptyList(): void
     {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response(''));
+        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batchSuccess());
 
         $this->expectException(\InvalidArgumentException::class);
 
         $client->orders()->createBatch([]);
     }
 
-    public function testDeletePostsTheAwbAndReturnsVoid(): void
+    public function testCreateBatchRequiresAPickupPoint(): void
     {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::success());
-
-        $client->orders()->delete('000112870071');
-
-        $this->assertRequest($httpClient, 'del_cmd.php');
-        self::assertSame('<msg><cmd><awb>000112870071</awb></cmd></msg>', $this->form($httpClient)['msg']);
-    }
-
-    public function testDeleteRejectsAnUnexpectedSuccessValue(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response('0'));
-
-        $this->expectException(UnexpectedStatusException::class);
-
-        $client->orders()->delete('000112870071');
-    }
-
-    public function testDeleteByUniqueIdPostsTheUniqueId(): void
-    {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::success());
-
-        $client->orders()->deleteByUniqueId('A4343244');
-
-        $this->assertRequest($httpClient, 'del_cmd_unq.php');
-        self::assertSame('<msg><cmd><unq>A4343244</unq></cmd></msg>', $this->form($httpClient)['msg']);
-    }
-
-    public function testStatusPostsTheAwbAndMapsTheStatus(): void
-    {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::status());
-
-        $status = $client->orders()->status('000112234242');
-
-        $this->assertRequest($httpClient, 'get_stat.php');
-        self::assertSame('<msg><cmd><awb>000112234242</awb></cmd></msg>', $this->form($httpClient)['msg']);
-
-        self::assertInstanceOf(OrderStatus::class, $status);
-        self::assertSame('A4343244', $status->uniqueId);
-        self::assertSame('000112234242', $status->awb);
-        self::assertSame(5, $status->statusId);
-        self::assertSame('Livrata', $status->statusDescription);
-        self::assertNull($status->observations);
-    }
-
-    public function testStatusByUniqueIdPostsTheUniqueId(): void
-    {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::status());
-
-        $status = $client->orders()->statusByUniqueId('A4343244');
-
-        $this->assertRequest($httpClient, 'get_stat_unq.php');
-        self::assertSame('<msg><cmd><unq>A4343244</unq></cmd></msg>', $this->form($httpClient)['msg']);
-        self::assertSame('A4343244', $status->uniqueId);
-    }
-
-    public function testHistoryPostsTheAwbAndMapsEveryEntry(): void
-    {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::history());
-
-        $history = $client->orders()->history('000112234242');
-
-        $this->assertRequest($httpClient, 'get_history.php');
-        self::assertSame('<msg><cmd><awb>000112234242</awb></cmd></msg>', $this->form($httpClient)['msg']);
-
-        self::assertCount(2, $history);
-        $entries = $history->all();
-        self::assertInstanceOf(HistoryEntry::class, $entries[0]);
-        self::assertSame('A4343244', $entries[0]->uniqueId);
-        self::assertSame('000112234242', $entries[0]->awb);
-        self::assertSame(1, $entries[0]->statusId);
-        self::assertSame('Preluata', $entries[0]->statusDescription);
-        self::assertSame('2020-02-18 07:46:00', $entries[0]->date);
-        self::assertSame('Prima scanare', $entries[0]->observations);
-        self::assertSame(5, $entries[1]->statusId);
-        self::assertSame('Livrata', $entries[1]->statusDescription);
-        self::assertNull($entries[1]->observations);
-    }
-
-    public function testHistoryByUniqueIdPostsTheUniqueId(): void
-    {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::history());
-
-        $history = $client->orders()->historyByUniqueId('A4343244');
-
-        $this->assertRequest($httpClient, 'get_history_unq.php');
-        self::assertSame('<msg><cmd><unq>A4343244</unq></cmd></msg>', $this->form($httpClient)['msg']);
-        self::assertCount(2, $history);
-    }
-
-    /**
-     * @return iterable<string, array{string}>
-     */
-    public static function negativeCodes(): iterable
-    {
-        yield '-2' => ['-2'];
-        yield '-3' => ['-3'];
-    }
-
-    #[DataProvider('negativeCodes')]
-    public function testNegativeCodesBecomeValidationExceptions(string $code): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response($code));
-
-        try {
-            $client->orders()->status('000112234242');
-
-            self::fail('Expected ValidationException.');
-        } catch (ValidationException $e) {
-            self::assertStringContainsString($code, $e->getMessage());
-            self::assertSame((int) $code, $e->error?->code);
-            self::assertNotNull($e->response);
-        }
-    }
-
-    public function testMinusOneBecomesAnAuthenticationException(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response('-1'));
-
-        $this->expectException(AuthenticationException::class);
-
-        $client->orders()->status('000112234242');
-    }
-
-    public function testAnInBandErrorBecomesAValidationException(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::error('AWB inexistent'));
-
-        try {
-            $client->orders()->history('000112234242');
-
-            self::fail('Expected ValidationException.');
-        } catch (ValidationException $e) {
-            self::assertSame('AWB inexistent', $e->getMessage());
-        }
-    }
-
-    public function testEmptyBodyBecomesAnUnexpectedStatusException(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response(''));
-
-        $this->expectException(UnexpectedStatusException::class);
-
-        $client->orders()->create($this->order(clientCode: 1234));
-    }
-
-    public function testCreateBatchRejectsAnInBandError(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batchError());
-
-        try {
-            $client->orders()->createBatch([$this->order(clientCode: 1234), $this->order(uniqueId: 'UNQ-2', clientCode: 1234)]);
-
-            self::fail('Expected ValidationException.');
-        } catch (ValidationException $e) {
-            self::assertSame('Batch rejected', $e->getMessage());
-        }
-    }
-
-    public function testCreateBatchRejectsAnErrorEvenWhenCmdsArePresent(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batchWithError());
-
-        $this->expectException(ValidationException::class);
-
-        $client->orders()->createBatch([$this->order(clientCode: 1234), $this->order(uniqueId: 'UNQ-2', clientCode: 1234)]);
-    }
-
-    public function testCreateBatchRejectsAResponseWithoutCmds(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batchWithoutCmds());
-
-        $this->expectException(UnexpectedStatusException::class);
-
-        $client->orders()->createBatch([$this->order(clientCode: 1234)]);
-    }
-
-    public function testCreateBatchRejectsAMalformedAwbInTheList(): void
-    {
-        [$client] = TestClientFactory::create(
-            static fn(): ResponseInterface => Fixture::xml('<msg><cmds>BOK0001,not-an-awb</cmds><err></err></msg>'),
-        );
-
-        $this->expectException(UnexpectedStatusException::class);
-
-        $client->orders()->createBatch([$this->order(clientCode: 1234), $this->order(uniqueId: 'UNQ-2', clientCode: 1234)]);
-    }
-
-    public function testCreateBatchRejectsDuplicateUniqueIds(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batch());
-
-        $this->expectException(\InvalidArgumentException::class);
-
-        $client->orders()->createBatch([$this->order(clientCode: 1234), $this->order(clientCode: 1234)]);
-    }
-
-    public function testCreateRequiresAClientCode(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::awb());
-
-        $this->expectException(\InvalidArgumentException::class);
-
-        $client->orders()->create($this->order());
-    }
-
-    public function testCreateBatchRequiresAClientCode(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batch());
+        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batchSuccess());
 
         $this->expectException(\InvalidArgumentException::class);
 
         $client->orders()->createBatch([$this->order()]);
     }
 
-    /**
-     * @return iterable<string, array{string}>
-     */
-    public static function validAwbs(): iterable
+    public function testHistoryGetsTheTrackingKeyAndTheAwb(): void
     {
-        yield 'BOK prefix' => ['BOK3925457'];
-        yield 'partner 12 digits' => ['062568455929'];
-        yield 'CKC prefix' => ['CKC122336'];
-        yield 'plain digits' => ['3925457'];
+        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::history());
+
+        $history = $client->orders()->history('BOK6000123456');
+
+        $request = $httpClient->lastRequest;
+        self::assertNotNull($request);
+        self::assertSame('GET', $request->getMethod());
+        self::assertSame('https://portal.bookurier.ro/api/awb_history.php?key=7BzvpY3PuANhhMajURYWn&awb=BOK6000123456', (string) $request->getUri());
+
+        self::assertCount(2, $history);
+        $events = $history->all();
+        self::assertInstanceOf(HistoryEvent::class, $events[0]);
+        self::assertSame('14.07.2023', $events[0]->date);
+        self::assertSame('2', $events[0]->statusId);
+        self::assertSame('Receptionata', $events[0]->statusName);
+        self::assertSame(Status::Received, $events[0]->status());
+
+        self::assertSame('15.07.2023', $events[1]->date);
+        self::assertSame(Status::Delivered, $events[1]->status());
+        self::assertTrue($events[1]->status()->isFinal());
     }
 
-    #[DataProvider('validAwbs')]
-    public function testCreateAcceptsAwbFormats(string $awb): void
+    public function testHistoryUsesTheConfiguredTrackingKey(): void
     {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response($awb));
+        [$client, $httpClient] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::history(),
+            new ClientConfig(userId: 'test-user', password: 'test-password', trackingKey: 'custom-key'),
+        );
 
-        self::assertSame($awb, $client->orders()->create($this->order(clientCode: 1234)));
+        $client->orders()->history('BOK6000123456');
+
+        self::assertNotNull($httpClient->lastRequest);
+        self::assertStringContainsString('key=custom-key', (string) $httpClient->lastRequest->getUri());
     }
 
-    public function testCreateRequiresADistrict(): void
+    public function testHistoryKeepsPartnerTextWithoutAStatusId(): void
     {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::awb());
+        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::historyWithPartnerText());
 
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Bookurier requires a district (sector or county): set Order::$district.');
+        $event = $client->orders()->history('BOK6000123456')->all()[0];
 
-        $client->orders()->create($this->order(clientCode: 1234, district: ''));
+        self::assertNull($event->statusId);
+        self::assertNull($event->status());
+        self::assertSame('In curs de livrare la curier partener', $event->statusName);
     }
 
-    public function testCreateBatchRequiresADistrict(): void
+    public function testHistoryClassifiesAnUnknownAwb(): void
     {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::batch());
-
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Bookurier requires a district (sector or county): set Order::$district.');
-
-        $client->orders()->createBatch([$this->order(clientCode: 1234, district: '  ')]);
-    }
-
-    public function testMinusFiveBecomesAValidationException(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response('-5'));
+        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::error('AWB inexistent'));
 
         $this->expectException(ValidationException::class);
-        $this->expectExceptionMessage('Bookurier returned -5: the service rejected the order (observed when <district> is missing or empty).');
 
-        $client->orders()->create($this->order(clientCode: 1234));
+        $client->orders()->history('BOK0000000000');
     }
 
-    private function order(string $uniqueId = 'UNQ-1', ?int $clientCode = null, string $district = 'Sect 1'): Order
+    public function testInvalidUserBecomesAnAuthenticationException(): void
     {
+        [$client] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::error('Invalid user'),
+            new ClientConfig(userId: 'test-user', password: 'test-password', pickupPoint: '5'),
+        );
+
+        $this->expectException(AuthenticationException::class);
+
+        $client->orders()->create($this->order());
+    }
+
+    public function testAnEmptyResponseBecomesAnUnexpectedStatusException(): void
+    {
+        [$client] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::response(''),
+            new ClientConfig(userId: 'test-user', password: 'test-password', pickupPoint: '5'),
+        );
+
+        $this->expectException(UnexpectedStatusException::class);
+
+        $client->orders()->create($this->order());
+    }
+
+    public function testAResponseWithoutAnAwbBecomesAnUnexpectedStatusException(): void
+    {
+        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::json([
+            'status' => 'success',
+            'data' => [],
+            'map' => [],
+            'errors' => [],
+            'message' => 'ok',
+        ]), new ClientConfig(userId: 'test-user', password: 'test-password', pickupPoint: '5'));
+
+        $this->expectException(UnexpectedStatusException::class);
+
+        $client->orders()->create($this->order());
+    }
+
+    private function order(
+        string $uniqueId = 'CMD-10001',
+        ?string $pickupPoint = null,
+        string $district = 'Hunedoara',
+    ): Order {
         return new Order(
             uniqueId: $uniqueId,
             recipientName: 'Ion Popescu',
-            phone: '0712345678',
-            city: 'Bucharest',
+            phone: '0744555555',
+            city: 'Deva',
+            street: 'Unirii',
+            service: ServiceType::National24,
+            weight: 1.5,
+            pickupPoint: $pickupPoint,
+            zip: '330020',
             district: $district,
-            street: 'Piața Unirii',
-            number: '10',
-            service: ServiceType::BucharestExpress,
-            weight: 2.5,
-            packages: 2,
-            clientCode: $clientCode,
+            number: '1',
         );
     }
 
-    /**
-     * @return array<string, string>
-     */
-    private function form(FakeHttpClient $httpClient): array
-    {
-        self::assertNotNull($httpClient->lastRequest);
-
-        parse_str((string) $httpClient->lastRequest->getBody(), $form);
-
-        /** @var array<string, string> $form */
-        return $form;
-    }
-
-    private function assertRequest(FakeHttpClient $httpClient, string $path): void
+    private function assertJsonPost(FakeHttpClient $httpClient, string $path): void
     {
         $request = $httpClient->lastRequest;
 
         self::assertNotNull($request);
         self::assertSame('POST', $request->getMethod());
-        self::assertSame('https://www.bookurier.ro/colete/serv/' . $path, (string) $request->getUri());
-        self::assertSame('application/x-www-form-urlencoded', $request->getHeaderLine('Content-Type'));
+        self::assertSame('https://portal.bookurier.ro/api/' . $path, (string) $request->getUri());
+        self::assertSame('application/json', $request->getHeaderLine('Content-Type'));
     }
 }

@@ -10,6 +10,7 @@ use Daika7ana\Bookurier\Exceptions\TransportException;
 use Daika7ana\Bookurier\Http\GuzzleHttpClient;
 use Daika7ana\Bookurier\Http\HttpClientInterface;
 use Daika7ana\Bookurier\Http\Psr18HttpClientAdapter;
+use Daika7ana\Bookurier\Resources\CitiesResource;
 use Daika7ana\Bookurier\Resources\LabelsResource;
 use Daika7ana\Bookurier\Resources\OrdersResource;
 use Daika7ana\Bookurier\Resources\PickupResource;
@@ -22,9 +23,10 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 
 /**
- * PSR-18 request builder for the Bookurier courier services API.
+ * PSR-18 request builder for Bookurier's October 2026 JSON API.
  *
- * Every endpoint is a form POST with `userid`, `pwd` and an optional `msg` XML payload.
+ * Account endpoints carry the portal user and pwd on every request; awb_history
+ * is public and needs only the shared tracking key.
  */
 class Client
 {
@@ -39,6 +41,8 @@ class Client
     private ?ReportsResource $reportsResource = null;
 
     private ?PickupResource $pickupResource = null;
+
+    private ?CitiesResource $citiesResource = null;
 
     public function __construct(
         ClientInterface $httpClient,
@@ -107,6 +111,11 @@ class Client
         return $this->pickupResource ??= new PickupResource($this);
     }
 
+    public function cities(): CitiesResource
+    {
+        return $this->citiesResource ??= new CitiesResource($this);
+    }
+
     public function createRequest(string $method, string $path): RequestInterface
     {
         $uri = rtrim($this->config->baseUrl, '/') . '/' . ltrim($path, '/');
@@ -115,23 +124,45 @@ class Client
     }
 
     /**
+     * Posts a raw JSON body, always carrying the credentials.
+     *
+     * @param array<string, mixed> $payload
+     *
+     * @throws AuthenticationException
+     * @throws TransportException
+     * @throws \JsonException when the payload cannot be encoded, e.g. it holds invalid UTF-8
+     * @throws \InvalidArgumentException when a per-call timeout cannot be applied to the transport
+     */
+    public function postJson(string $endpoint, array $payload, ?float $timeout = null): ResponseInterface
+    {
+        $this->assertCredentials();
+
+        $body = json_encode(
+            ['user' => $this->config->userId, 'pwd' => $this->config->password] + $payload,
+            JSON_THROW_ON_ERROR,
+        );
+
+        $request = $this->createRequest('POST', $endpoint)
+            ->withHeader('Content-Type', 'application/json')
+            ->withBody($this->streamFactory->createStream($body));
+
+        return $this->send($request, $timeout);
+    }
+
+    /**
      * Posts a form-encoded request, always carrying the credentials.
      *
-     * @param array<string, string> $form Extra form fields, usually `msg`.
+     * @param array<string, string> $fields Extra form fields.
      *
      * @throws AuthenticationException
      * @throws TransportException
      * @throws \InvalidArgumentException when a per-call timeout cannot be applied to the transport
      */
-    public function post(string $endpoint, array $form = [], ?float $timeout = null): ResponseInterface
+    public function postForm(string $endpoint, array $fields = [], ?float $timeout = null): ResponseInterface
     {
-        if ($this->config->userId === '' || $this->config->password === '') {
-            throw new AuthenticationException(
-                'Bookurier credentials are missing. Pass them to ClientConfig or set BOOKURIER_USERNAME and BOOKURIER_PASSWORD.',
-            );
-        }
+        $this->assertCredentials();
 
-        $fields = ['userid' => $this->config->userId, 'pwd' => $this->config->password] + $form;
+        $fields = ['user' => $this->config->userId, 'pwd' => $this->config->password] + $fields;
 
         $request = $this->createRequest('POST', $endpoint)
             ->withHeader('Content-Type', 'application/x-www-form-urlencoded')
@@ -141,7 +172,25 @@ class Client
     }
 
     /**
+     * GETs a public endpoint; no account credentials are attached.
+     *
+     * @param array<string, string> $query
+     *
      * @throws TransportException
+     * @throws \InvalidArgumentException when a per-call timeout cannot be applied to the transport
+     */
+    public function get(string $endpoint, array $query = [], ?float $timeout = null): ResponseInterface
+    {
+        $path = $query === []
+            ? $endpoint
+            : $endpoint . '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+
+        return $this->send($this->createRequest('GET', $path), $timeout);
+    }
+
+    /**
+     * @throws TransportException
+     * @throws \InvalidArgumentException when a per-call timeout cannot be applied to the transport
      */
     public function send(RequestInterface $request, ?float $timeout = null): ResponseInterface
     {
@@ -170,5 +219,14 @@ class Client
         }
 
         return new self($httpClient, $requestFactory, $streamFactory, $config);
+    }
+
+    private function assertCredentials(): void
+    {
+        if ($this->config->userId === '' || $this->config->password === '') {
+            throw new AuthenticationException(
+                'Bookurier credentials are missing. Pass them to ClientConfig or set BOOKURIER_USERNAME and BOOKURIER_PASSWORD.',
+            );
+        }
     }
 }

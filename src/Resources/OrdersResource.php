@@ -5,217 +5,107 @@ declare(strict_types=1);
 namespace Daika7ana\Bookurier\Resources;
 
 use Daika7ana\Bookurier\Client;
-use Daika7ana\Bookurier\DTOs\Order\HistoryEntry;
+use Daika7ana\Bookurier\Config\ClientConfig;
+use Daika7ana\Bookurier\DTOs\Order\BatchResult;
+use Daika7ana\Bookurier\DTOs\Order\HistoryEvent;
 use Daika7ana\Bookurier\DTOs\Order\Order;
+use Daika7ana\Bookurier\DTOs\Order\OrderError;
 use Daika7ana\Bookurier\DTOs\Order\OrderReference;
-use Daika7ana\Bookurier\DTOs\Order\OrderStatus;
 use Daika7ana\Bookurier\Exceptions\AuthenticationException;
 use Daika7ana\Bookurier\Exceptions\TransportException;
 use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
 use Daika7ana\Bookurier\Exceptions\ValidationException;
 use Daika7ana\Bookurier\Support\ResponseBody;
-use Daika7ana\Bookurier\Support\Xml;
-use Daika7ana\Bookurier\Support\XmlResponse;
 use Daika7ana\SimpleCollections\Collection;
 
 final class OrdersResource
 {
-    // Three live shapes, chosen server-side: `BOK` + 7 digits, 12 bare digits on
-    // partner routes, or `CKC` + 6 digits. Kept lenient on purpose.
-    private const AWB_PATTERN = '/^[A-Za-z]{0,4}\d{3,}$/';
-
     public function __construct(
         private Client $client,
     ) {}
 
     /**
-     * Creates one order and returns the generated AWB.
+     * Creates one order and returns its AWB.
      *
-     * @throws ValidationException
+     * @throws ValidationException when the order is listed in the response errors
      * @throws AuthenticationException
      * @throws TransportException
      * @throws UnexpectedStatusException
+     * @throws \InvalidArgumentException when the pickup point or district is missing
      */
     public function create(Order $order): string
     {
-        $this->assertOrderRequirements($order);
+        $body = ResponseBody::json($this->client->postJson('add_cmds.php', [
+            'data' => [$this->payload($order)],
+        ]));
 
-        $response = $this->client->post('add_cmd.php', ['msg' => Xml::message($order->toXml($this->client->getConfig()->clientId))]);
-        $awb = ResponseBody::text($response);
-
-        if (preg_match(self::AWB_PATTERN, $awb) !== 1) {
-            throw new UnexpectedStatusException(
-                $response,
-                sprintf('Expected an AWB number. Got: "%s".', substr($awb, 0, 200)),
-                retryAfter: ResponseBody::retryAfter($response),
-            );
+        $errors = $this->mapErrors($body);
+        if ($errors !== []) {
+            throw $this->errorException($errors[0], $body);
         }
 
-        return $awb;
+        $map = $body->map();
+        if (isset($map[$order->uniqueId])) {
+            return $map[$order->uniqueId];
+        }
+
+        $data = $body->data();
+        if (isset($data[0]) && is_string($data[0])) {
+            return $data[0];
+        }
+
+        throw new UnexpectedStatusException(
+            $body->response(),
+            'Response carries no AWB for the order.',
+            retryAfter: ResponseBody::retryAfter($body->response()),
+        );
     }
 
     /**
-     * Creates several orders in one call (`add_cmds.php`).
+     * Creates several orders in one call and maps each unq to its AWB.
      *
      * @param list<Order> $orders
-     * @return Collection<int, OrderReference>
      *
      * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
      * @throws UnexpectedStatusException
+     * @throws \InvalidArgumentException when the list is empty, a uniqueId repeats, or a pickup point or district is missing
      */
-    public function createBatch(array $orders): Collection
+    public function createBatch(array $orders): BatchResult
     {
         if ($orders === []) {
             throw new \InvalidArgumentException('createBatch() needs at least one order.');
         }
 
-        $uniqueIds = [];
+        $data = [];
+        $seen = [];
         foreach ($orders as $order) {
-            $this->assertOrderRequirements($order);
-
-            if ($order->uniqueId !== '' && isset($uniqueIds[$order->uniqueId])) {
-                throw new \InvalidArgumentException('createBatch() requires unique uniqueId values: AWB pairing is positional.');
+            if ($order->uniqueId !== '' && isset($seen[$order->uniqueId])) {
+                throw new \InvalidArgumentException('createBatch() requires unique uniqueId values: the response map pairs by unq.');
             }
 
-            $uniqueIds[$order->uniqueId] = true;
+            $seen[$order->uniqueId] = true;
+            $data[] = $this->payload($order);
         }
 
-        $clientCode = $this->client->getConfig()->clientId;
-        $commands = '';
-        foreach ($orders as $order) {
-            $commands .= $order->toXml($clientCode);
-        }
-
-        $response = $this->client->post('add_cmds.php', ['msg' => Xml::message('<cmds>' . $commands . '</cmds>')]);
-        $xml = ResponseBody::xml($response);
-
-        $cmds = $xml->text('cmds');
-        if ($cmds === null) {
-            throw new UnexpectedStatusException(
-                $response,
-                'Response XML has no <cmds> element.',
-                retryAfter: ResponseBody::retryAfter($response),
-            );
-        }
-
-        // Live API answers <msg><cmds>BOK1,BOK2</cmds></msg>: a comma list, not <cmd> elements.
-        $awbs = array_values(array_filter(
-            array_map(trim(...), explode(',', $cmds)),
-            static fn(string $awb): bool => $awb !== '',
-        ));
-
-        if (count($awbs) !== count($orders)) {
-            throw new UnexpectedStatusException(
-                $response,
-                sprintf('Expected %d AWBs, got %d.', count($orders), count($awbs)),
-                retryAfter: ResponseBody::retryAfter($response),
-            );
-        }
+        $body = ResponseBody::json($this->client->postJson('add_cmds.php', ['data' => $data]));
+        $map = $body->map();
 
         $references = [];
-        foreach ($orders as $index => $order) {
-            if (preg_match(self::AWB_PATTERN, $awbs[$index]) !== 1) {
-                throw new UnexpectedStatusException(
-                    $response,
-                    'Expected an AWB number.',
-                    retryAfter: ResponseBody::retryAfter($response),
-                );
+        foreach ($orders as $order) {
+            if (isset($map[$order->uniqueId])) {
+                $references[] = new OrderReference($order->uniqueId, $map[$order->uniqueId]);
             }
-
-            $references[] = new OrderReference($order->uniqueId, $awbs[$index]);
         }
 
-        return new Collection($references);
-    }
-
-    private function assertOrderRequirements(Order $order): void
-    {
-        if (($order->clientCode ?? $this->client->getConfig()->clientId) === null) {
-            throw new \InvalidArgumentException(
-                'Bookurier requires a client code: set Order::$clientCode or ClientConfig::clientId (BOOKURIER_CLIENT_ID).',
-            );
-        }
-
-        if (trim((string) $order->district) === '') {
-            throw new \InvalidArgumentException(
-                'Bookurier requires a district (sector or county): set Order::$district.',
-            );
-        }
+        return new BatchResult(new Collection($references), new Collection($this->mapErrors($body)));
     }
 
     /**
-     * Deletes an order by AWB.
+     * Every recorded event for an AWB, chronological; the last one is current.
      *
-     * @throws ValidationException
-     * @throws AuthenticationException
-     * @throws TransportException
-     * @throws UnexpectedStatusException
-     */
-    public function delete(string $awb): void
-    {
-        ResponseBody::success(
-            $this->client->post('del_cmd.php', ['msg' => Xml::message(Xml::cmd(['awb' => $awb]))]),
-        );
-    }
-
-    /**
-     * Deletes an order by the caller's own identifier.
-     *
-     * @throws ValidationException
-     * @throws AuthenticationException
-     * @throws TransportException
-     * @throws UnexpectedStatusException
-     */
-    public function deleteByUniqueId(string $uniqueId): void
-    {
-        ResponseBody::success(
-            $this->client->post('del_cmd_unq.php', ['msg' => Xml::message(Xml::cmd(['unq' => $uniqueId]))]),
-        );
-    }
-
-    /**
-     * Current status of an order, looked up by AWB.
-     *
-     * @throws ValidationException
-     * @throws AuthenticationException
-     * @throws TransportException
-     * @throws UnexpectedStatusException
-     */
-    public function status(string $awb): OrderStatus
-    {
-        $xml = ResponseBody::xml(
-            $this->client->post('get_stat.php', ['msg' => Xml::message(Xml::cmd(['awb' => $awb]))]),
-        );
-
-        return OrderStatus::fromArray($xml->cmd());
-    }
-
-    /**
-     * Current status of an order, looked up by the caller's own identifier.
-     *
-     * @throws ValidationException
-     * @throws AuthenticationException
-     * @throws TransportException
-     * @throws UnexpectedStatusException
-     */
-    public function statusByUniqueId(string $uniqueId): OrderStatus
-    {
-        $xml = ResponseBody::xml(
-            $this->client->post('get_stat_unq.php', ['msg' => Xml::message(Xml::cmd(['unq' => $uniqueId]))]),
-        );
-
-        return OrderStatus::fromArray($xml->cmd());
-    }
-
-    /**
-     * Every recorded status change for an order, looked up by AWB.
-     *
-     * The live `get_history.php` answers `-2` even for a valid AWB; prefer
-     * {@see historyByUniqueId()}.
-     *
-     * @return Collection<int, HistoryEntry>
+     * @return Collection<int, HistoryEvent>
      *
      * @throws ValidationException
      * @throws AuthenticationException
@@ -224,42 +114,61 @@ final class OrdersResource
      */
     public function history(string $awb): Collection
     {
-        return $this->mapHistory(
-            ResponseBody::xml(
-                $this->client->post('get_history.php', ['msg' => Xml::message(Xml::cmd(['awb' => $awb]))]),
-            ),
-        );
-    }
+        $key = $this->client->getConfig()->trackingKey ?? ClientConfig::DEFAULT_TRACKING_KEY;
 
-    /**
-     * Every recorded status change for an order, looked up by the caller's own identifier.
-     *
-     * @return Collection<int, HistoryEntry>
-     *
-     * @throws ValidationException
-     * @throws AuthenticationException
-     * @throws TransportException
-     * @throws UnexpectedStatusException
-     */
-    public function historyByUniqueId(string $uniqueId): Collection
-    {
-        return $this->mapHistory(
-            ResponseBody::xml(
-                $this->client->post('get_history_unq.php', ['msg' => Xml::message(Xml::cmd(['unq' => $uniqueId]))]),
-            ),
-        );
-    }
+        $body = ResponseBody::json($this->client->get('awb_history.php', ['key' => $key, 'awb' => $awb]));
 
-    /**
-     * @return Collection<int, HistoryEntry>
-     */
-    private function mapHistory(XmlResponse $xml): Collection
-    {
-        $entries = [];
-        foreach ($xml->commands() as $command) {
-            $entries[] = HistoryEntry::fromArray($command);
+        $events = [];
+        foreach ($body->data() as $row) {
+            if (is_array($row)) {
+                /** @var array<string, mixed> $row */
+                $events[] = HistoryEvent::fromArray($row);
+            }
         }
 
-        return new Collection($entries);
+        return new Collection($events);
+    }
+
+    /**
+     * @return array<string, string|int|float>
+     */
+    private function payload(Order $order): array
+    {
+        $pickupPoint = $this->client->getConfig()->requirePickupPoint($order->pickupPoint);
+
+        if (trim((string) $order->district) === '') {
+            throw new \InvalidArgumentException(
+                'Bookurier requires a district (sector or county): set Order::$district.',
+            );
+        }
+
+        return ['pickup_point' => $pickupPoint] + $order->toArray();
+    }
+
+    /**
+     * @return list<OrderError>
+     */
+    private function mapErrors(ResponseBody $body): array
+    {
+        $errors = [];
+        foreach ($body->errors() as $error) {
+            $errors[] = OrderError::fromArray($error);
+        }
+
+        return $errors;
+    }
+
+    private function errorException(OrderError $error, ResponseBody $body): ValidationException
+    {
+        $message = $error->message;
+        if ($error->suggestion !== null) {
+            $message = trim($message . ' ' . $error->suggestion);
+        }
+
+        return new ValidationException(
+            message: $message === '' ? 'Bookurier rejected the order.' : $message,
+            response: $body->response(),
+            retryAfter: ResponseBody::retryAfter($body->response()),
+        );
     }
 }

@@ -9,7 +9,8 @@ use Throwable;
 use Psr\Http\Message\ResponseInterface;
 
 /**
- * Thrown when Bookurier rejects the request data in-band (`-2`, `-3`, `-5` or `<err>`).
+ * Thrown when Bookurier rejects the request data (JSON envelope status "error"),
+ * or the request is answered with HTTP 400 / 422.
  */
 class ValidationException extends BookurierException
 {

@@ -1,64 +1,64 @@
 # DTOs and Enums
 
 Request objects are `final readonly` classes with public camelCase properties and
-a `toXml()` method. Response objects are `final readonly` classes; `OrderStatus`
-and `HistoryEntry` are built with a `fromArray(array $data): self` factory, while
-`OrderReference` is constructed positionally by `createBatch()`. The XML tags keep
-the vendor's names, so most of them are abbreviated or snake_case.
+a `toArray()` method. Response objects are `final readonly` classes; most are
+built with a `fromArray(array $data): self` factory, while `OrderReference` is
+constructed positionally. Wire names keep the vendor's abbreviations and
+snake_case; PHP properties stay camelCase.
 
 ## `Order` request DTO
 
-`Daika7ana\Bookurier\DTOs\Order\Order` maps to the `<cmd>` body of
-`add_cmd.php` / `add_cmds.php`. Constructor arguments without a default are
-required; everything else may be omitted.
+`Daika7ana\Bookurier\DTOs\Order\Order` maps to one entry in the `data` list of
+`add_cmds.php`. Constructor arguments without a default are required in PHP;
+`district` and a pickup point are also required by the service.
 
-| Property | XML tag | Type | Required |
-|---|---|---|---|
-| `uniqueId` | `unq` | `string` | Yes |
-| `recipientName` | `recv` | `string` | Yes |
-| `phone` | `phone` | `string` | Yes |
-| `city` | `city` | `string` | Yes |
-| `street` | `street` | `string` | Yes |
-| `number` | `no` | `?string` | No; omit it when the number is part of `street` |
-| `service` | `service` | `ServiceType` | Yes |
-| `weight` | `weight` | `float` | Yes |
-| `packages` | `packs` | `int` | No, default `1` |
-| `country` | `country` | `string` | No, default `Romania` |
-| `zip` | `zip` | `?string` | No |
-| `district` | `district` | `?string` | Yes; sector (`Sect 1`) or county — the service answers `-5` without it |
-| `email` | `email` | `?string` | No |
-| `block` | `bl` | `?string` | No |
-| `entrance` | `ent` | `?string` | No |
-| `floor` | `floor` | `?string` | No |
-| `apartment` | `apt` | `?string` | No |
-| `interphone` | `interphone` | `?string` | No |
-| `exchangePackage` | `exchange_pack` | `bool` | No, default `false` |
-| `cashOnDelivery` | `rbs_val` | `?float` | No; amount in RON |
-| `confirmation` | `confirmation` | `bool` | No, default `false` |
-| `returnDocument` | `ret_doc` | `bool` | No, default `false` |
-| `returnDocumentDescription` | `ret_doc_desc` | `?string` | No |
-| `insuredValue` | `insurance_val` | `?float` | No; amount in RON |
-| `notes` | `notes` | `?string` | No |
-| `clientCode` | `client` | `?int` | No; defaults to `ClientConfig::clientId` |
+| Property | Wire name | Type | Default | Notes |
+|---|---|---|---|---|
+| `uniqueId` | `unq` | `string` | required | Your order id; vendor limit 20 characters |
+| `recipientName` | `recv` | `string` | required | Vendor limit 80 characters |
+| `phone` | `phone` | `string` | required | |
+| `city` | `city` | `string` | required | |
+| `street` | `street` | `string` | required | Vendor limit 300 characters |
+| `service` | `service` | `ServiceType` | required | Backing int is sent |
+| `weight` | `weight` | `float` | required | Parcel weight |
+| `packages` | `packs` | `int` | `1` | |
+| `pickupPoint` | `pickup_point` | `?string` | `null` | Falls back to `ClientConfig::pickupPoint` |
+| `country` | `country` | `string` | `'Romania'` | |
+| `zip` | `zip` | `?string` | `null` | |
+| `district` | `district` | `?string` | `null` | Required in practice: county, or `Sector 1`..`Sector 6` for Bucharest |
+| `email` | `email` | `?string` | `null` | |
+| `number` | `no` | `?string` | `null` | Street number; omit it when the number is part of `street` |
+| `block` | `bl` | `?string` | `null` | |
+| `entrance` | `ent` | `?string` | `null` | |
+| `floor` | `floor` | `?string` | `null` | |
+| `apartment` | `apt` | `?string` | `null` | |
+| `interphone` | `interphone` | `?string` | `null` | |
+| `cashOnDelivery` | `rbs_val` | `?float` | `null` | Amount in RON |
+| `insuredValue` | `insurance_val` | `?float` | `null` | Amount in RON |
+| `returnDocument` | `ret_doc` | `bool` | `false` | |
+| `weekend` | `weekend` | `bool` | `false` | |
+| `unpack` | `unpack` | `bool` | `false` | |
+| `exchangePackage` | `exchange_pack` | `bool` | `false` | |
+| `confirmation` | `confirmation` | `bool` | `false` | |
+| `notes` | `notes` | `?string` | `null` | Vendor limit 800 characters |
+| `ref1` | `ref1` | `?string` | `null` | Free reference |
+| `ref2` | `ref2` | `?string` | `null` | Free reference |
 
-`toXml(?int $defaultClientCode = null)` builds `<cmd>...</cmd>` and, when a code
-exists, emits `<client>` first using `clientCode ?? $defaultClientCode`. The API
-requires that element; `create()` / `createBatch()` throw
-`InvalidArgumentException` when neither value is set.
+The SDK does not enforce the vendor character limits; it sends what you give it.
 
 ### Serialization rules
 
 - **Null omission** — a `null` property is left out entirely, not sent empty.
-  Optional address parts therefore disappear when unset.
-- **Booleans** — `exchangePackage`, `confirmation` and `returnDocument` are
-  non-nullable and always emitted, as `1` or `0`. The documentation spells the
-  tag `<exange_pack>`; the SDK emits `exchange_pack`.
-- **Escaping** — every value is cast to string and escaped with
-  `htmlspecialchars($value, ENT_QUOTES | ENT_XML1, 'UTF-8')`, so `&`, `<`, `>`,
-  `"` and `'` in an address or note cannot break the XML.
-- **Envelope** — the resources wrap the result themselves:
-  `msg=<msg><cmd>...</cmd></msg>`. A bare `<cmd>` without the `<msg>` wrapper is
-  rejected with `-1`.
+- **Booleans** — `returnDocument`, `weekend`, `unpack`, `exchangePackage` and
+  `confirmation` are always emitted, as `1` or `0`.
+- **Zero values** — `0.0` cash-on-delivery and insured values are kept.
+- **Pickup point** — the resource adds `pickup_point` to every order from
+  `Order::$pickupPoint`, else `ClientConfig::pickupPoint`; a missing value throws
+  `InvalidArgumentException` before sending.
+- **Unique id** — `uniqueId` is your correlation id. It is not a deduplication
+  key across separate calls: two orders with the same value both get AWBs.
+  Within one batch the response map is keyed by `unq`, so duplicate non-empty
+  values are rejected locally.
 
 ```php
 use Daika7ana\Bookurier\DTOs\Order\Order;
@@ -67,73 +67,84 @@ use Daika7ana\Bookurier\Enums\ServiceType;
 $order = new Order(
     uniqueId: 'A1',
     recipientName: 'Ionescu Vasile',
-    phone: '0744-666847',
+    phone: '0744666847',
     city: 'Bucuresti',
     street: 'Nicolae Oncescu nr. 6',
-
     service: ServiceType::Bucharest24h,
     weight: 0.5,
-    district: 'Sect 1',
+    district: 'Sector 1',
     cashOnDelivery: 100.65,
 );
 
-echo $order->toXml(1234);
-// <cmd><client>1234</client><unq>A1</unq><recv>Ionescu Vasile</recv>...
+$payload = $order->toArray();
+// ['unq' => 'A1', 'recv' => 'Ionescu Vasile', ..., 'service' => 1, ...]
 ```
 
 ## `ServiceType` enum
 
 `Daika7ana\Bookurier\Enums\ServiceType` is an `int`-backed enum; the backing value
-is what goes into `<service>`. `label()` returns the English description.
+goes into `service`. `label()` returns the English description.
 
 | Case | Value | `label()` |
 |---|---|---|
 | `Bucharest24h` | `1` | `Bucharest 24h` |
-| `BucharestExpress` | `2` | `Bucharest express` (documentation only) |
 | `Metropolitan` | `3` | `Metropolitan` |
-| `Extins` | `5` | `Extins` |
-| `BucharestToday` | `7` | `Bucharest Today` |
+| `IlfovExtins` | `5` | `Ilfov Extins` |
 | `NationalEconomic` | `8` | `National Economic` |
-| `National24` | `9` | `National Standard` |
+| `National24` | `9` | `National 24` |
 | `NationalPremium` | `11` | `National Premium` |
 
-Codes and labels follow the plugin's service picker, which offers `1`, `3`, `5`,
-`7`, `8`, `9` and `11`. Code `2` appears only in the original documentation. The
-service field is not validated server-side: codes `4`, `5`, `6`, `8` and
-`10` all produced AWBs in a 2026-11-20 probe, so an unlisted value silently
-behaves like a default. Use the codes above.
+The 1.x codes `2` (Bucharest express) and `7` (Bucharest Today) are not part of
+this enum.
+
+## `Status` enum
+
+`Daika7ana\Bookurier\Enums\Status` maps the `status_id` values in
+`awb_history.php`. `Status::isFinal()` is true for `NotPicked`, `Completed`,
+`ReturnToSenderConfirmed`, `RefundPaid`, `Delivered` and `ReturnCompleted`; stop
+polling an AWB once its latest event resolves to one of them.
+
+| Id | Case | Id | Case |
+|---|---|---|---|
+| `-1` | `NotPicked` | `12` | `PickedUp` |
+| `0` | `NewParcel` | `14` | `OutForDelivery` |
+| `1` | `NewOrder` | `15` | `RedirectedByPartner` |
+| `2` | `Received` | `16` | `Collected` |
+| `3` | `Assigned` | `17` | `Compensation` |
+| `4` | `Completed` | `18` | `Delivered` |
+| `5` | `CashOnDeliveryHandover` | `20` | `InTransit` |
+| `6` | `ReturnedToWarehouse` | `22` | `ReturnWarehouse` |
+| `7` | `ReturnedToSender` | `30` | `DeliveryLine` |
+| `8` | `Delayed` | `33` | `DeliveryFailed` |
+| `9` | `ReturnToSenderConfirmed` | `70` | `ReturnLine` |
+| `10` | `RefundPaid` | `77` | `ReturnFailed` |
+| `11` | `Redirected` | `99` | `ReturnCompleted` |
+
+An empty or non-numeric `status_id`, and an unknown numeric id, do not resolve
+to a case.
 
 ## Response DTOs
 
-`OrderStatus::fromArray()` and `HistoryEntry::fromArray()` read the flattened
-`<cmd>` element. Missing elements become `''` or `0`; an empty `obs` or `date`
-becomes `null`.
+| DTO | Members | Source |
+|---|---|---|
+| `OrderReference` | `string $uniqueId`, `string $awb` | Built by `createBatch()` from the response map |
+| `BatchResult` | `references(): Collection<OrderReference>`, `errors(): Collection<OrderError>`, `hasErrors(): bool` | `add_cmds.php` |
+| `OrderError` | `string $order`, `string $message`, `?string $suggestion` | One entry in `errors` |
+| `HistoryEvent` | `string $date`, `?string $statusId`, `string $statusName`, `string $obs`, `string $sortDate`; `status(): ?Status` | One entry in `awb_history.php` `data` |
+| `PartnerCity` | `string $city`, `string $district`, `string $zip`, `string $zone`, `string $sort`, `string $driver`, `int $kg` | One entry in `get_partner_cities.php` `data` |
 
-| DTO | Property | Source element | Type |
-|---|---|---|---|
-| `OrderStatus` | `uniqueId` | `unq` | `string` |
-| | `awb` | `awb` | `string` |
-| | `statusId` | `status_id` | `int` |
-| | `statusDescription` | `status_desc` | `string` |
-| | `observations` | `obs` | `?string` |
-| `HistoryEntry` | `uniqueId` | `unq` | `string` |
-| | `awb` | `awb` | `string` |
-| | `statusId` | `status_id` | `int` |
-| | `statusDescription` | `status_desc` | `string` |
-| | `date` | `date` | `?string`; raw `Y-m-d H:i:s`, no timezone |
-| | `observations` | `obs` | `?string` |
-| `OrderReference` | `uniqueId` | your `Order::$uniqueId` | `string` |
-| | `awb` | AWB at the same index | `string` |
+`HistoryEvent::$date` is the vendor's `data` value, formatted `dd.mm.yyyy`.
+`$sortDate` is the vendor's `sort_date`, formatted `Y-m-d H:i:s`. An empty
+`status_id` becomes `null`; this is partner-courier free text, and
+`status()` returns `null` for it. Non-numeric and unknown numeric ids also
+return `null`.
 
-`OrderReference` is not parsed from the batch response: `add_cmds.php` sends no
-`unq`, so `createBatch()` constructs each one positionally. See
-[Resources](RESOURCES.md#createbatcharray-orders-collection) for the pairing and
-error rules.
+`OrderError::$suggestion` is `null` when the service sends none.
 
 ## `Document`
 
-Labels, the daily bordero and the pickup bordero are returned as
-`Daika7ana\Bookurier\Support\Document`, not parsed DTOs.
+Labels and the bordero are returned as `Daika7ana\Bookurier\Support\Document`;
+the SDK does not parse them.
 
 | Member | Type | Meaning |
 |---|---|---|
@@ -141,17 +152,18 @@ Labels, the daily bordero and the pickup bordero are returned as
 | `$mimeType` | `string` | `Content-Type`, defaulting to `application/octet-stream` when the header is absent |
 | `isPdf()` | `bool` | `true` when `$contents` starts with `%PDF` after leading whitespace |
 
-`isPdf()` sniffs the body, not the header. The SDK rejects the host's challenge
-page on every document endpoint and `pdf()` / `pdfByUniqueId()` require a `%PDF`
-body; the check still helps when a different proxy page arrives with HTTP 200.
+`isPdf()` sniffs the body, not the header. `labels()->pdf()` rejects a body that
+does not start with `%PDF`; `labels()->html()` and `reports()->borderou()` return
+the body as-is.
 
 ## Collections
 
-`createBatch()` returns `Collection<int, OrderReference>`; `history($awb)` and
-`historyByUniqueId($uniqueId)` return `Collection<int, HistoryEntry>`. All are
-`Daika7ana\SimpleCollections\Collection` instances, iterable, countable and
-array-accessible.
+`createBatch()->references()` and `->errors()`, `history()` and
+`partnerCities()` return `Daika7ana\SimpleCollections\Collection` instances,
+iterable, countable and array-accessible. The `Order` payload itself is a plain
+array from `toArray()`.
 
-`history($awb)` answers `-2` even for a valid AWB on the live service; see the
-canonical note in [Resources](RESOURCES.md#historystring-awb-collection).
-`historyByUniqueId()` is the working path.
+## Errors
+
+`Daika7ana\Bookurier\DTOs\Common\Errors\BookurierError` describes a JSON
+`status: "error"` envelope. See [Errors](ERRORS.md#bookuriererror).

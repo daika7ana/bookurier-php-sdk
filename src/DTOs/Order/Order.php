@@ -5,18 +5,18 @@ declare(strict_types=1);
 namespace Daika7ana\Bookurier\DTOs\Order;
 
 use Daika7ana\Bookurier\Enums\ServiceType;
-use Daika7ana\Bookurier\Support\Xml;
 
 /**
- * A shipment as expected by `add_cmd.php` / `add_cmds.php`.
+ * A shipment as expected by add_cmds.php.
  */
 final readonly class Order
 {
     /**
-     * @param string|null $district Sector ("Sect 1") or county, as Bookurier expects it.
-     * @param float|null $insuredValue Declared value, in RON.
+     * @param string|null $pickupPoint Pickup point number; falls back to ClientConfig::pickupPoint.
+     * @param string|null $district County, or "Sector 1".."Sector 6" for Bucharest.
      * @param float|null $cashOnDelivery Cash on delivery amount, in RON.
-     * @param string|null $number Street number; leave null when it is part of `$street`.
+     * @param float|null $insuredValue Declared value, in RON.
+     * @param string|null $number Street number; some partners refuse orders without it.
      */
     public function __construct(
         public string $uniqueId,
@@ -27,6 +27,7 @@ final readonly class Order
         public ServiceType $service,
         public float $weight,
         public int $packages = 1,
+        public ?string $pickupPoint = null,
         public string $country = 'Romania',
         public ?string $zip = null,
         public ?string $district = null,
@@ -37,31 +38,32 @@ final readonly class Order
         public ?string $floor = null,
         public ?string $apartment = null,
         public ?string $interphone = null,
-        public bool $exchangePackage = false,
         public ?float $cashOnDelivery = null,
-        public bool $confirmation = false,
-        public bool $returnDocument = false,
-        public ?string $returnDocumentDescription = null,
         public ?float $insuredValue = null,
+        public bool $returnDocument = false,
+        public bool $weekend = false,
+        public bool $unpack = false,
+        public bool $exchangePackage = false,
+        public bool $confirmation = false,
         public ?string $notes = null,
-        public ?int $clientCode = null,
+        public ?string $ref1 = null,
+        public ?string $ref2 = null,
     ) {}
 
     /**
-     * @param int|null $defaultClientCode Used for `client` when this order has no explicit code.
+     * @return array<string, string|int|float>
      */
-    public function toXml(?int $defaultClientCode = null): string
+    public function toArray(): array
     {
-        return Xml::cmd([
-            'client' => $this->clientCode ?? $defaultClientCode,
+        return array_filter([
             'unq' => $this->uniqueId,
             'recv' => $this->recipientName,
             'phone' => $this->phone,
             'email' => $this->email,
             'country' => $this->country,
+            'district' => $this->district,
             'city' => $this->city,
             'zip' => $this->zip,
-            'district' => $this->district,
             'street' => $this->street,
             'no' => $this->number,
             'bl' => $this->block,
@@ -71,14 +73,17 @@ final readonly class Order
             'interphone' => $this->interphone,
             'service' => $this->service->value,
             'packs' => $this->packages,
-            'exchange_pack' => $this->exchangePackage ? 1 : 0,
             'weight' => $this->weight,
             'rbs_val' => $this->cashOnDelivery,
-            'confirmation' => $this->confirmation ? 1 : 0,
-            'ret_doc' => $this->returnDocument ? 1 : 0,
-            'ret_doc_desc' => $this->returnDocumentDescription,
             'insurance_val' => $this->insuredValue,
+            'ret_doc' => $this->returnDocument ? 1 : 0,
+            'weekend' => $this->weekend ? 1 : 0,
+            'unpack' => $this->unpack ? 1 : 0,
+            'exchange_pack' => $this->exchangePackage ? 1 : 0,
+            'confirmation' => $this->confirmation ? 1 : 0,
             'notes' => $this->notes,
-        ]);
+            'ref1' => $this->ref1,
+            'ref2' => $this->ref2,
+        ], static fn(mixed $value): bool => $value !== null);
     }
 }

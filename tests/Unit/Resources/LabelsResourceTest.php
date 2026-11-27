@@ -4,9 +4,8 @@ declare(strict_types=1);
 
 namespace Daika7ana\Bookurier\Tests\Unit\Resources;
 
-use Daika7ana\Bookurier\Exceptions\AuthenticationException;
 use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
-use Daika7ana\Bookurier\Tests\Support\FakeHttpClient;
+use Daika7ana\Bookurier\Exceptions\ValidationException;
 use Daika7ana\Bookurier\Tests\Support\Fixture;
 use Daika7ana\Bookurier\Tests\Support\TestClientFactory;
 use PHPUnit\Framework\TestCase;
@@ -14,116 +13,74 @@ use Psr\Http\Message\ResponseInterface;
 
 final class LabelsResourceTest extends TestCase
 {
-    public function testHtmlByAwb(): void
-    {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::html());
-
-        $document = $client->labels()->html('000112870071');
-
-        $this->assertRequest($httpClient, 'get_AWB.php', '<msg><cmd><awb>000112870071</awb></cmd></msg>');
-        self::assertSame(Fixture::HTML_BODY, $document->contents);
-        self::assertSame('text/html; charset=UTF-8', $document->mimeType);
-        self::assertFalse($document->isPdf());
-    }
-
-    public function testPdfByAwb(): void
+    public function testPdfPostsOneAwbAsJsonAndReturnsThePdf(): void
     {
         [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::pdf());
 
-        $document = $client->labels()->pdf('000112870071');
+        $document = $client->labels()->pdf('BOK6000123456');
 
-        $this->assertRequest($httpClient, 'get_AWB_pdf.php', '<msg><cmd><awb>000112870071</awb></cmd></msg>');
-        self::assertSame(Fixture::PDF_BODY, $document->contents);
-        self::assertSame('application/pdf', $document->mimeType);
-        self::assertTrue($document->isPdf());
-    }
-
-    public function testPdfRejectsANonPdfBody(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::html());
-
-        $this->expectException(UnexpectedStatusException::class);
-
-        $client->labels()->pdf('000112870071');
-    }
-
-    public function testPdfByUniqueIdRejectsANonPdfBody(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::html());
-
-        $this->expectException(UnexpectedStatusException::class);
-
-        $client->labels()->pdfByUniqueId('A4343244');
-    }
-
-    public function testHtmlByUniqueId(): void
-    {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::html());
-
-        $document = $client->labels()->htmlByUniqueId('A4343244');
-
-        $this->assertRequest($httpClient, 'get_AWB_unq.php', '<msg><cmd><unq>A4343244</unq></cmd></msg>');
-        self::assertSame(Fixture::HTML_BODY, $document->contents);
-        self::assertFalse($document->isPdf());
-    }
-
-    public function testPdfByUniqueId(): void
-    {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::pdf());
-
-        $document = $client->labels()->pdfByUniqueId('A4343244');
-
-        $this->assertRequest($httpClient, 'get_AWB_unq_pdf.php', '<msg><cmd><unq>A4343244</unq></cmd></msg>');
-        self::assertSame(Fixture::PDF_BODY, $document->contents);
-        self::assertSame('application/pdf', $document->mimeType);
-        self::assertTrue($document->isPdf());
-    }
-
-    public function testDailySendsNoMessage(): void
-    {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::html());
-
-        $document = $client->labels()->daily();
-
-        $this->assertRequest($httpClient, 'get_AWB_list.php');
-        self::assertArrayNotHasKey('msg', $this->form($httpClient));
-        self::assertSame(Fixture::HTML_BODY, $document->contents);
-        self::assertFalse($document->isPdf());
-    }
-
-    public function testMinusOneBecomesAnAuthenticationException(): void
-    {
-        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response('-1'));
-
-        $this->expectException(AuthenticationException::class);
-
-        $client->labels()->html('000112870071');
-    }
-
-    private function assertRequest(FakeHttpClient $httpClient, string $path, ?string $message = null): void
-    {
         $request = $httpClient->lastRequest;
-
         self::assertNotNull($request);
         self::assertSame('POST', $request->getMethod());
-        self::assertSame('https://www.bookurier.ro/colete/serv/' . $path, (string) $request->getUri());
-        self::assertSame('application/x-www-form-urlencoded', $request->getHeaderLine('Content-Type'));
+        self::assertSame('https://portal.bookurier.ro/api/print_awbs.php', (string) $request->getUri());
+        self::assertSame('application/json', $request->getHeaderLine('Content-Type'));
+        self::assertSame([
+            'user' => 'test-user',
+            'pwd' => 'test-password',
+            'data' => ['BOK6000123456'],
+            'format' => 'pdf',
+            'page' => 0,
+        ], $httpClient->lastJson());
 
-        if ($message !== null) {
-            self::assertSame($message, $this->form($httpClient)['msg']);
+        self::assertTrue($document->isPdf());
+    }
+
+    public function testHtmlPostsTheListModeAndPage(): void
+    {
+        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::html());
+
+        $document = $client->labels()->html(['BOK6000123456', 'BOK6000123457'], 's', 2);
+
+        self::assertSame([
+            'user' => 'test-user',
+            'pwd' => 'test-password',
+            'data' => ['BOK6000123456', 'BOK6000123457'],
+            'format' => 'html',
+            'mode' => 's',
+            'page' => 2,
+        ], $httpClient->lastJson());
+
+        self::assertSame(Fixture::HTML_BODY, $document->contents);
+    }
+
+    public function testAJsonErrorEnvelopeBecomesAValidationException(): void
+    {
+        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::error('Invalid request'));
+
+        $this->expectException(ValidationException::class);
+
+        $client->labels()->pdf('BOK6000123456');
+    }
+
+    public function testRateLimitBecomesAnUnexpectedStatusExceptionWithRetryAfter(): void
+    {
+        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::rateLimited(30));
+
+        try {
+            $client->labels()->pdf('BOK6000123456');
+
+            self::fail('Expected UnexpectedStatusException.');
+        } catch (UnexpectedStatusException $e) {
+            self::assertSame(30, $e->retryAfter);
         }
     }
 
-    /**
-     * @return array<string, string>
-     */
-    private function form(FakeHttpClient $httpClient): array
+    public function testHtmlRejectsANonHtmlNonJsonBody(): void
     {
-        self::assertNotNull($httpClient->lastRequest);
+        [$client] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response('', 'text/html'));
 
-        parse_str((string) $httpClient->lastRequest->getBody(), $form);
+        $this->expectException(UnexpectedStatusException::class);
 
-        /** @var array<string, string> $form */
-        return $form;
+        $client->labels()->html('BOK6000123456');
     }
 }

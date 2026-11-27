@@ -11,7 +11,6 @@ use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
 use Daika7ana\Bookurier\Exceptions\ValidationException;
 use Daika7ana\Bookurier\Support\Document;
 use Daika7ana\Bookurier\Support\ResponseBody;
-use Daika7ana\Bookurier\Support\Xml;
 
 final class LabelsResource
 {
@@ -20,77 +19,57 @@ final class LabelsResource
     ) {}
 
     /**
-     * AWB label as HTML, by AWB.
+     * AWB labels as PDF, for one AWB or a list.
+     *
+     * @param string|list<string> $awbs
      *
      * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
      * @throws UnexpectedStatusException
      */
-    public function html(string $awb): Document
+    public function pdf(string|array $awbs, ?string $mode = null, int $page = 0): Document
     {
         return ResponseBody::document(
-            $this->client->post('get_AWB.php', ['msg' => Xml::message(Xml::cmd(['awb' => $awb]))]),
-        );
-    }
-
-    /**
-     * AWB label as PDF, by AWB.
-     *
-     * @throws ValidationException
-     * @throws AuthenticationException
-     * @throws TransportException
-     * @throws UnexpectedStatusException
-     */
-    public function pdf(string $awb): Document
-    {
-        return ResponseBody::document(
-            $this->client->post('get_AWB_pdf.php', ['msg' => Xml::message(Xml::cmd(['awb' => $awb]))]),
+            $this->client->postJson('print_awbs.php', $this->payload($awbs, 'pdf', $mode, $page)),
             'pdf',
         );
     }
 
     /**
-     * AWB label as HTML, by the caller's own identifier.
+     * AWB labels as HTML, for one AWB or a list.
+     *
+     * @param string|list<string> $awbs
      *
      * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
      * @throws UnexpectedStatusException
      */
-    public function htmlByUniqueId(string $uniqueId): Document
+    public function html(string|array $awbs, ?string $mode = null, int $page = 0): Document
     {
         return ResponseBody::document(
-            $this->client->post('get_AWB_unq.php', ['msg' => Xml::message(Xml::cmd(['unq' => $uniqueId]))]),
+            $this->client->postJson('print_awbs.php', $this->payload($awbs, 'html', $mode, $page)),
         );
     }
 
     /**
-     * AWB label as PDF, by the caller's own identifier.
-     *
-     * @throws ValidationException
-     * @throws AuthenticationException
-     * @throws TransportException
-     * @throws UnexpectedStatusException
+     * @param string|list<string> $awbs
+     * @return array<string, mixed>
      */
-    public function pdfByUniqueId(string $uniqueId): Document
+    private function payload(string|array $awbs, string $format, ?string $mode, int $page): array
     {
-        return ResponseBody::document(
-            $this->client->post('get_AWB_unq_pdf.php', ['msg' => Xml::message(Xml::cmd(['unq' => $uniqueId]))]),
-            'pdf',
-        );
-    }
+        $payload = [
+            'data' => is_array($awbs) ? array_values($awbs) : [$awbs],
+            'format' => $format,
+        ];
 
-    /**
-     * Labels for every order of the day, in one HTML document.
-     *
-     * @throws ValidationException
-     * @throws AuthenticationException
-     * @throws TransportException
-     * @throws UnexpectedStatusException
-     */
-    public function daily(): Document
-    {
-        return ResponseBody::document($this->client->post('get_AWB_list.php'));
+        if ($mode !== null) {
+            $payload['mode'] = $mode;
+        }
+
+        $payload['page'] = $page;
+
+        return $payload;
     }
 }

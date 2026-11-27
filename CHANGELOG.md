@@ -5,6 +5,50 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-11-27
+
+### Changed
+
+- Release 2.0.0 as a clean break for the October 2026 JSON portal API; 1.x remains the legacy XML line.
+- Target `https://portal.bookurier.ro/api`; remove the 1.x XML endpoints under `/colete/serv`.
+- Send portal credentials as `user` and `pwd` on account requests; `awb_history.php` uses the shared tracking key only.
+- Replace the account client code with a required pickup point (`Order::$pickupPoint`, `ClientConfig::$pickupPoint` or `BOOKURIER_PICKUP_POINT`).
+- Replace `Order::toXml()` with `Order::toArray()`.
+- Return only the AWB from `orders()->create()`; callers must persist it because by-unique-id lookups are removed.
+- Return `BatchResult` from `orders()->createBatch()`, exposing partial success through `references()`, `errors()` and `hasErrors()`.
+- Map batch results by `unq` instead of by position.
+- Treat the AWB as an opaque string; remove pattern validation.
+- Return `Collection<HistoryEvent>` from `orders()->history()`; the last event is the current status.
+- Return `Document` from `labels()->pdf()` and `labels()->html()`, which accept one AWB or a list plus optional `mode` and `page`.
+- Return an HTML `Document` from `reports()->borderou()`, which requires a date.
+- Return the confirmation string from `pickup()->request()`, still `@experimental`.
+- Rename `ServiceType::Extins` to `ServiceType::IlfovExtins` and relabel `National24` as `National 24`.
+- Map JSON `status: "error"` messages: `Invalid user` and `Login fail` raise `AuthenticationException`, other messages raise `ValidationException`.
+- Map HTTP 429 to `UnexpectedStatusException` and expose `Retry-After` as `$retryAfter`.
+- Describe the JSON error message in `BookurierError`; the API sends no numeric error code.
+
+### Added
+
+- Add `cities()->partnerCities()` returning `Collection<PartnerCity>`.
+- Add `Enums\Status` and `Status::isFinal()` for history statuses.
+- Add `Client::postJson()`, `Client::postForm()` and `Client::get()` helpers.
+- Add `ClientConfig::withPickupPoint()`, `ClientConfig::withTrackingKey()` and `ClientConfig::requirePickupPoint()`, the shared pickup-point resolution used by orders, reports and pickup.
+- Add `BatchResult`, `OrderError`, `HistoryEvent` and `PartnerCity` DTOs.
+- Add `BOOKURIER_PICKUP_POINT` and `BOOKURIER_TRACKING_KEY` environment variables.
+
+### Removed
+
+- Remove `Order::$clientCode`, `ClientConfig::$clientId` and `BOOKURIER_CLIENT_ID`.
+- Remove `Order::$returnDocumentDescription`; `Order::$returnDocument` remains.
+- Remove `BOOKURIER_USERID`.
+- Remove `Client::post()`; use `postJson()`, `postForm()` or `get()`.
+- Remove `orders()->delete()`, `deleteByUniqueId()`, `status()`, `statusByUniqueId()` and `historyByUniqueId()`.
+- Remove `labels()->htmlByUniqueId()`, `pdfByUniqueId()` and `daily()`.
+- Remove `reports()->dailyBordero()`.
+- Remove `ServiceType::BucharestToday` (`7`) and `ServiceType::BucharestExpress` (`2`).
+- Remove `BookurierError::isValidationRelated()` and `isAuthenticationRelated()`.
+- Remove `Support\Xml`, `Support\XmlResponse`, `OrderStatus`, `HistoryEntry` and the `ext-dom` requirement.
+
 ## [1.3.0] - 2026-11-25
 
 ### Changed

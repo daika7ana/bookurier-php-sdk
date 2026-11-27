@@ -38,12 +38,12 @@ body:
       label: Related area
       options:
         - Authentication
-        - Orders (create / status / history)
+        - Orders (create / batch / history)
         - Batch orders
         - Labels / documents
         - Reports (bordero)
         - Pickup (experimental)
-        - XML mapping / DTOs
+        - Order payload / DTOs
         - HTTP client / transport
         - Documentation
         - Testing / developer tooling

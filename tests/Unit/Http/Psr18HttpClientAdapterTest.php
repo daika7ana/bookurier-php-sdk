@@ -36,7 +36,7 @@ final class Psr18HttpClientAdapterTest extends TestCase
                 return $this->response;
             }
         };
-        $request = new Request('POST', 'https://example.test/add_cmd.php', ['Content-Type' => 'text/plain'], 'payload');
+        $request = new Request('POST', 'https://example.test/endpoint.php', ['Content-Type' => 'text/plain'], 'payload');
 
         $result = (new Psr18HttpClientAdapter($client))->sendRequest($request);
 
@@ -110,10 +110,10 @@ final class Psr18HttpClientAdapterTest extends TestCase
             config: new ClientConfig(userId: 'user', password: 'pass'),
         );
 
-        $response = $bookurier->post('add_cmd.php', ['msg' => '<msg></msg>']);
+        $response = $bookurier->postJson('add_cmds.php', ['data' => []]);
 
         self::assertSame('000112870071', (string) $response->getBody());
         self::assertNotNull($client->request);
-        self::assertSame('https://www.bookurier.ro/colete/serv/add_cmd.php', (string) $client->request->getUri());
+        self::assertSame('https://portal.bookurier.ro/api/add_cmds.php', (string) $client->request->getUri());
     }
 }

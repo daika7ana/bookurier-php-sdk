@@ -18,26 +18,169 @@ final class Fixture
         return new Response($status, ['Content-Type' => $contentType], $body);
     }
 
-    public static function awb(): ResponseInterface
+    /**
+     * @param array<string, mixed> $payload
+     */
+    public static function json(array $payload, int $status = 200): ResponseInterface
     {
-        return self::response('BOK3925457');
+        return self::response(json_encode($payload, JSON_THROW_ON_ERROR), 'application/json', $status);
     }
 
-    public static function success(): ResponseInterface
+    public static function addSuccess(): ResponseInterface
     {
-        return self::response('1');
+        return self::json([
+            'status' => 'success',
+            'data' => ['BOK6000123456'],
+            'map' => ['CMD-10001' => 'BOK6000123456'],
+            'errors' => [],
+            'message' => 'ok',
+        ]);
     }
 
-    public static function error(string $message = 'Invalid credentials', int $status = 200): ResponseInterface
+    public static function addSuccessWithoutMap(): ResponseInterface
     {
-        $escaped = htmlspecialchars($message, ENT_QUOTES | ENT_XML1, 'UTF-8');
-
-        return self::response('<msg><cmd></cmd><err>' . $escaped . '</err></msg>', 'text/xml', $status);
+        return self::json([
+            'status' => 'success',
+            'data' => ['BOK6000123456'],
+            'errors' => [],
+            'message' => 'ok',
+        ]);
     }
 
-    public static function xml(string $body): ResponseInterface
+    public static function batchSuccess(): ResponseInterface
     {
-        return self::response($body, 'text/xml');
+        return self::json([
+            'status' => 'success',
+            'data' => ['BOK6000123456', 'BOK6000123457'],
+            'map' => [
+                'CMD-10001' => 'BOK6000123456',
+                'CMD-10002' => 'BOK6000123457',
+            ],
+            'errors' => [],
+            'message' => 'ok',
+        ]);
+    }
+
+    public static function batchPartial(): ResponseInterface
+    {
+        return self::json([
+            'status' => 'success',
+            'data' => ['BOK6000123456'],
+            'map' => ['CMD-10001' => 'BOK6000123456'],
+            'errors' => [[
+                'order' => 'CMD-10002',
+                'message' => 'Judet invalid',
+                'suggestion' => 'Verificati judetul.',
+            ]],
+            'message' => 'ok',
+        ]);
+    }
+
+    public static function orderError(string $message = 'Judet invalid', ?string $suggestion = 'Verificati judetul.'): ResponseInterface
+    {
+        return self::json([
+            'status' => 'success',
+            'data' => [],
+            'map' => [],
+            'errors' => [[
+                'order' => 'CMD-10001',
+                'message' => $message,
+                'suggestion' => $suggestion,
+            ]],
+            'message' => 'ok',
+        ]);
+    }
+
+    public static function history(): ResponseInterface
+    {
+        return self::json([
+            'status' => 'success',
+            'data' => [
+                [
+                    'data' => '14.07.2023',
+                    'status_id' => '2',
+                    'status_name' => 'Receptionata',
+                    'obs' => '0',
+                    'sort_date' => '2023-07-14 11:44:12',
+                ],
+                [
+                    'data' => '15.07.2023',
+                    'status_id' => '18',
+                    'status_name' => 'Livrat',
+                    'obs' => '',
+                    'sort_date' => '2023-07-15 09:10:00',
+                ],
+            ],
+            'message' => 'ok',
+        ]);
+    }
+
+    public static function historyWithPartnerText(): ResponseInterface
+    {
+        return self::json([
+            'status' => 'success',
+            'data' => [[
+                'data' => '16.07.2023',
+                'status_id' => '',
+                'status_name' => 'In curs de livrare la curier partener',
+                'obs' => '',
+                'sort_date' => '2023-07-16 08:00:00',
+            ]],
+            'message' => 'ok',
+        ]);
+    }
+
+    public static function partnerCities(): ResponseInterface
+    {
+        return self::json([
+            'status' => 'success',
+            'count' => 2,
+            'data' => [
+                [
+                    'city' => 'Ploiesti',
+                    'district' => 'Prahova',
+                    'zip' => '100087',
+                    'zone' => 'MUNTENIA',
+                    'sort' => 'PH',
+                    'driver' => '20102',
+                    'kg' => 300,
+                ],
+                [
+                    'city' => 'Campina',
+                    'district' => 'Prahova',
+                    'zip' => '105600',
+                    'zone' => 'MUNTENIA',
+                    'sort' => 'PH',
+                    'driver' => '20102',
+                    'kg' => 300,
+                ],
+            ],
+            'message' => 'ok',
+        ]);
+    }
+
+    public static function pickup(): ResponseInterface
+    {
+        return self::json([
+            'status' => 'success',
+            'message' => 'Pickup requested for tomorrow.',
+        ]);
+    }
+
+    public static function error(string $message = 'Invalid request'): ResponseInterface
+    {
+        return self::json(['status' => 'error', 'message' => $message]);
+    }
+
+    public static function rateLimited(int $retryAfter = 42): ResponseInterface
+    {
+        return new Response(429, [
+            'Content-Type' => 'application/json',
+            'Retry-After' => (string) $retryAfter,
+        ], json_encode([
+            'status' => 'error',
+            'message' => sprintf('Too many requests, retry in %d seconds', $retryAfter),
+        ], JSON_THROW_ON_ERROR));
     }
 
     public static function html(): ResponseInterface
@@ -50,47 +193,6 @@ final class Fixture
         return self::response(self::PDF_BODY, 'application/pdf');
     }
 
-    public static function status(): ResponseInterface
-    {
-        return self::xml(
-            '<msg><cmd><unq>A4343244</unq><awb>000112234242</awb>'
-            . '<status_id>5</status_id><status_desc>Livrata</status_desc><obs></obs>'
-            . '</cmd><err></err></msg>',
-        );
-    }
-
-    public static function history(): ResponseInterface
-    {
-        return self::xml(
-            '<msg>'
-            . '<cmd><unq>A4343244</unq><awb>000112234242</awb><status_id>1</status_id>'
-            . '<status_desc>Preluata</status_desc><date>2020-02-18 07:46:00</date><obs>Prima scanare</obs></cmd>'
-            . '<cmd><unq>A4343244</unq><awb>000112234242</awb><status_id>5</status_id>'
-            . '<status_desc>Livrata</status_desc><date>2020-02-19 12:30:00</date><obs></obs></cmd>'
-            . '<err></err></msg>',
-        );
-    }
-
-    public static function batch(): ResponseInterface
-    {
-        return self::xml('<msg><cmds>BOK0001,BOK0002</cmds><err></err></msg>');
-    }
-
-    public static function batchError(): ResponseInterface
-    {
-        return self::xml('<msg><err>Batch rejected</err></msg>');
-    }
-
-    public static function batchWithError(): ResponseInterface
-    {
-        return self::xml('<msg><cmds>BOK0001,BOK0002</cmds><err>Partial failure</err></msg>');
-    }
-
-    public static function batchWithoutCmds(): ResponseInterface
-    {
-        return self::xml('<msg><err></err></msg>');
-    }
-
     public static function challenge(): ResponseInterface
     {
         return self::response(
@@ -98,10 +200,5 @@ final class Fixture
             . '<body>Your request is being verified by challenge-platform</body></html>',
             'text/html; charset=UTF-8',
         );
-    }
-
-    public static function whitespaceNegative(): ResponseInterface
-    {
-        return self::response("  -1\n");
     }
 }

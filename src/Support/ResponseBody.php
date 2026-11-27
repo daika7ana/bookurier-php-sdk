@@ -10,21 +10,35 @@ use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
 use Daika7ana\Bookurier\Exceptions\ValidationException;
 use Psr\Http\Message\ResponseInterface;
 
+/**
+ * Classifies Bookurier's JSON envelopes and raw documents.
+ *
+ * Status:error envelopes map "Invalid user"/"Login fail" to AuthenticationException
+ * and everything else to ValidationException; a non-JSON body where JSON is
+ * expected (or a challenge page) raises UnexpectedStatusException.
+ */
 final class ResponseBody
 {
-    private function __construct() {}
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function __construct(
+        private ResponseInterface $response,
+        private array $payload,
+    ) {}
 
     /**
-     * @throws AuthenticationException `-1`, or HTTP 401 without an in-band signal
-     * @throws ValidationException `-2`, `-3`, `-5`, or HTTP 400/422 without one
-     * @throws UnexpectedStatusException any other negative code or non-2xx status, or an empty body
+     * @throws AuthenticationException
+     * @throws ValidationException
+     * @throws UnexpectedStatusException
      */
-    public static function text(ResponseInterface $response): string
+    public static function json(ResponseInterface $response): self
     {
-        $body = self::body($response);
+        $contents = trim((string) $response->getBody());
+
         self::rejectByStatus($response);
 
-        if ($body === '') {
+        if ($contents === '') {
             throw new UnexpectedStatusException(
                 $response,
                 'Bookurier returned an empty response body.',
@@ -32,67 +46,27 @@ final class ResponseBody
             );
         }
 
-        return $body;
-    }
+        $decoded = json_decode($contents, true);
 
-    /**
-     * @throws AuthenticationException
-     * @throws ValidationException
-     * @throws UnexpectedStatusException
-     */
-    public static function xml(ResponseInterface $response): XmlResponse
-    {
-        $body = self::body($response);
-
-        if ($body === '') {
-            self::rejectByStatus($response);
-
+        if (! is_array($decoded)) {
             throw new UnexpectedStatusException(
                 $response,
-                'Bookurier returned an empty response body.',
+                sprintf('Expected a JSON response. Got: "%s".', substr($contents, 0, 200)),
                 retryAfter: self::retryAfter($response),
             );
         }
 
-        try {
-            $xml = XmlResponse::from($body, $response);
-        } catch (UnexpectedStatusException $e) {
-            // A non-2xx status outranks an unparseable body, but not an in-band <err>.
-            self::rejectByStatus($response);
-
-            throw $e;
+        /** @var array<string, mixed> $decoded */
+        if (($decoded['status'] ?? null) === 'error') {
+            self::throwError($decoded, $response);
         }
 
-        $error = $xml->error();
-
-        if ($error !== null) {
-            self::throwInBandError(BookurierError::fromArray(['message' => $error]), $response, validationByDefault: true);
-        }
-
-        self::rejectByStatus($response);
-
-        return $xml;
+        return new self($response, $decoded);
     }
 
     /**
-     * @throws AuthenticationException
-     * @throws ValidationException
-     * @throws UnexpectedStatusException
-     */
-    public static function success(ResponseInterface $response): void
-    {
-        $body = self::text($response);
-
-        if ($body !== '1') {
-            throw new UnexpectedStatusException(
-                $response,
-                sprintf('Expected "1" for success. Got: "%s".', substr($body, 0, 200)),
-                retryAfter: self::retryAfter($response),
-            );
-        }
-    }
-
-    /**
+     * Returns a raw PDF/HTML body, still classifying a JSON error envelope.
+     *
      * @throws AuthenticationException
      * @throws ValidationException
      * @throws UnexpectedStatusException
@@ -100,11 +74,11 @@ final class ResponseBody
     public static function document(ResponseInterface $response, ?string $expected = null): Document
     {
         $contents = (string) $response->getBody();
+        $trimmed = trim($contents);
 
-        self::rejectNegativeCode(trim($contents), $response);
         self::rejectByStatus($response);
 
-        if ($contents === '') {
+        if ($trimmed === '') {
             throw new UnexpectedStatusException(
                 $response,
                 'Bookurier returned an empty document.',
@@ -112,10 +86,27 @@ final class ResponseBody
             );
         }
 
+        if (str_starts_with($trimmed, '{')) {
+            $decoded = json_decode($trimmed, true);
+
+            if (is_array($decoded)) {
+                /** @var array<string, mixed> $decoded */
+                if (($decoded['status'] ?? null) === 'error') {
+                    self::throwError($decoded, $response);
+                }
+
+                throw new UnexpectedStatusException(
+                    $response,
+                    'Expected a document, got a JSON response.',
+                    retryAfter: self::retryAfter($response),
+                );
+            }
+        }
+
         if (self::isChallenge($contents)) {
             throw new UnexpectedStatusException(
                 $response,
-                sprintf('Bookurier returned an HTML challenge page instead of the API response; wait a few minutes and retry. Got: "%s".', substr($contents, 0, 200)),
+                sprintf('Bookurier returned an HTML challenge page instead of a document; wait a few minutes and retry. Got: "%s".', substr($contents, 0, 200)),
                 retryAfter: self::retryAfter($response),
             );
         }
@@ -133,28 +124,82 @@ final class ResponseBody
         return new Document($contents, $mimeType === '' ? 'application/octet-stream' : $mimeType);
     }
 
-    /**
-     * Trims the body and lets an in-band negative code win over the status.
-     *
-     * @throws AuthenticationException
-     * @throws ValidationException
-     * @throws UnexpectedStatusException
-     */
-    private static function body(ResponseInterface $response): string
+    public function response(): ResponseInterface
     {
-        $body = trim((string) $response->getBody());
-
-        self::rejectNegativeCode($body, $response);
-
-        return $body;
+        return $this->response;
     }
 
     /**
-     * Standard HTTP mapping, used only when the body carries no in-band signal.
-     *
+     * @return list<mixed>
+     */
+    public function data(): array
+    {
+        $data = $this->payload['data'] ?? [];
+
+        return is_array($data) ? array_values($data) : [];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function map(): array
+    {
+        $map = $this->payload['map'] ?? [];
+
+        if (! is_array($map)) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($map as $key => $value) {
+            if (is_string($value)) {
+                $result[(string) $key] = $value;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function errors(): array
+    {
+        $errors = $this->payload['errors'] ?? [];
+
+        if (! is_array($errors)) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($errors as $error) {
+            if (is_array($error)) {
+                /** @var array<string, mixed> $error */
+                $result[] = $error;
+            }
+        }
+
+        return $result;
+    }
+
+    public function message(): string
+    {
+        $message = $this->payload['message'] ?? '';
+
+        return is_string($message) ? $message : '';
+    }
+
+    public static function retryAfter(ResponseInterface $response): ?int
+    {
+        $value = trim($response->getHeaderLine('Retry-After'));
+
+        return ctype_digit($value) ? (int) $value : null;
+    }
+
+    /**
      * @throws AuthenticationException on 401
      * @throws ValidationException on 400 or 422
-     * @throws UnexpectedStatusException on any other non-2xx status
+     * @throws UnexpectedStatusException on any other non-2xx status, 429 included
      */
     private static function rejectByStatus(ResponseInterface $response): void
     {
@@ -178,11 +223,35 @@ final class ResponseBody
         throw new UnexpectedStatusException($response, $message, retryAfter: $retryAfter);
     }
 
-    public static function retryAfter(ResponseInterface $response): ?int
+    /**
+     * @param array<string, mixed> $payload
+     *
+     * @throws AuthenticationException
+     * @throws ValidationException
+     */
+    private static function throwError(array $payload, ResponseInterface $response): never
     {
-        $value = trim($response->getHeaderLine('Retry-After'));
+        $message = trim((string) ($payload['message'] ?? ''));
+        $message = $message === '' ? 'Bookurier returned an error.' : $message;
+        $error = BookurierError::fromArray(['message' => $message]);
+        $retryAfter = self::retryAfter($response);
+        $lower = strtolower($message);
 
-        return ctype_digit($value) ? (int) $value : null;
+        if (str_contains($lower, 'invalid user') || str_contains($lower, 'login fail')) {
+            throw new AuthenticationException(
+                $message,
+                response: $response,
+                retryAfter: $retryAfter,
+                error: $error,
+            );
+        }
+
+        throw new ValidationException(
+            message: $message,
+            response: $response,
+            retryAfter: $retryAfter,
+            error: $error,
+        );
     }
 
     private static function isChallenge(string $contents): bool
@@ -194,61 +263,5 @@ final class ResponseBody
         }
 
         return false;
-    }
-
-    /**
-     * Bookurier reports errors as a bare negative integer in the body.
-     *
-     * @throws AuthenticationException
-     * @throws ValidationException
-     * @throws UnexpectedStatusException
-     */
-    private static function rejectNegativeCode(string $body, ResponseInterface $response): void
-    {
-        if (preg_match('/^-\d+$/', $body) !== 1) {
-            return;
-        }
-
-        $code = (int) $body;
-        $message = match ($code) {
-            -1 => 'Bookurier returned -1: the request was rejected (bad credentials or malformed msg).',
-            -2 => 'Bookurier returned -2: the record was not found, or the request data is invalid.',
-            -3 => 'Bookurier returned -3: the request was incomplete (a label request without its msg envelope).',
-            -5 => 'Bookurier returned -5: the service rejected the order (observed when <district> is missing or empty).',
-            default => 'Bookurier returned ' . $code . ': the request was rejected.',
-        };
-
-        self::throwInBandError(BookurierError::fromArray(['code' => $code, 'message' => $message]), $response);
-    }
-
-    /**
-     * @throws AuthenticationException
-     * @throws ValidationException
-     * @throws UnexpectedStatusException
-     */
-    private static function throwInBandError(BookurierError $error, ResponseInterface $response, bool $validationByDefault = false): never
-    {
-        $retryAfter = self::retryAfter($response);
-
-        if ($error->isAuthenticationRelated()) {
-            throw new AuthenticationException(
-                $error->message,
-                response: $response,
-                retryAfter: $retryAfter,
-                error: $error,
-            );
-        }
-
-        if ($validationByDefault || $error->isValidationRelated()) {
-            throw new ValidationException(
-                errors: [],
-                message: $error->message,
-                response: $response,
-                retryAfter: $retryAfter,
-                error: $error,
-            );
-        }
-
-        throw new UnexpectedStatusException($response, $error->message, retryAfter: $retryAfter, error: $error);
     }
 }

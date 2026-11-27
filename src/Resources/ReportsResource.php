@@ -19,15 +19,23 @@ final class ReportsResource
     ) {}
 
     /**
-     * The daily order list (bordero), as HTML.
+     * The printable bordero for one pickup point and date.
+     *
+     * @param string $date yyyy-mm-dd or dd-mm-yyyy, as the vendor accepts both.
      *
      * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
      * @throws UnexpectedStatusException
+     * @throws \InvalidArgumentException when no pickup point is given or configured
      */
-    public function dailyBordero(): Document
+    public function borderou(string $date, ?string $pickupPoint = null, ?float $timeout = null): Document
     {
-        return ResponseBody::document($this->client->post('get_cmd_list.php'));
+        $pickup = $this->client->getConfig()->requirePickupPoint($pickupPoint);
+
+        return ResponseBody::document($this->client->postForm('print_borderou.php', [
+            'pickup' => $pickup,
+            'filter_date' => $date,
+        ], $timeout));
     }
 }

@@ -50,7 +50,7 @@ final class ClientTest extends TestCase
         new Client($foreign, $factory, $factory, new ClientConfig(userId: 'user', password: 'pass', timeout: 5.0));
     }
 
-    public function testMissingCredentialsAreRejectedBeforeSending(): void
+    public function testMissingCredentialsAreRejectedBeforeSendingJson(): void
     {
         [$client, $httpClient] = TestClientFactory::create(
             static fn(): ResponseInterface => Fixture::response(''),
@@ -58,7 +58,7 @@ final class ClientTest extends TestCase
         );
 
         try {
-            $client->post('add_cmd.php');
+            $client->postJson('add_cmds.php', ['data' => []]);
 
             self::fail('Expected AuthenticationException.');
         } catch (AuthenticationException $e) {
@@ -68,24 +68,92 @@ final class ClientTest extends TestCase
         self::assertNull($httpClient->lastRequest);
     }
 
-    public function testPostSendsCredentialsAndMessageAsAForm(): void
+    public function testMissingCredentialsAreRejectedBeforeSendingForm(): void
     {
-        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::awb());
+        [$client, $httpClient] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::response(''),
+            config: new ClientConfig(),
+        );
 
-        $response = $client->post('add_cmd.php', ['msg' => '<msg><cmd></cmd></msg>']);
+        try {
+            $client->postForm('print_borderou.php', ['pickup' => '5', 'filter_date' => '2026-11-26']);
 
-        self::assertSame('BOK3925457', (string) $response->getBody());
+            self::fail('Expected AuthenticationException.');
+        } catch (AuthenticationException $e) {
+            self::assertStringContainsString('credentials are missing', $e->getMessage());
+        }
+
+        self::assertNull($httpClient->lastRequest);
+    }
+
+    public function testGetWorksWithoutAccountCredentials(): void
+    {
+        [$client, $httpClient] = TestClientFactory::create(
+            static fn(): ResponseInterface => Fixture::history(),
+            config: new ClientConfig(),
+        );
+
+        $client->get('awb_history.php', ['key' => 'track-key', 'awb' => 'BOK6000123456']);
+
+        $request = $httpClient->lastRequest;
+        self::assertNotNull($request);
+        self::assertSame('GET', $request->getMethod());
+        self::assertSame('', $request->getBody()->getContents());
+    }
+
+    public function testPostJsonSendsCredentialsAndPayloadAsJson(): void
+    {
+        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::addSuccess());
+
+        $client->postJson('add_cmds.php', ['data' => [['unq' => 'CMD-10001']]]);
 
         $request = $httpClient->lastRequest;
         self::assertNotNull($request);
         self::assertSame('POST', $request->getMethod());
-        self::assertSame('https://www.bookurier.ro/colete/serv/add_cmd.php', (string) $request->getUri());
-        self::assertSame('application/x-www-form-urlencoded', $request->getHeaderLine('Content-Type'));
+        self::assertSame('https://portal.bookurier.ro/api/add_cmds.php', (string) $request->getUri());
+        self::assertSame('application/json', $request->getHeaderLine('Content-Type'));
+        self::assertSame([
+            'user' => 'test-user',
+            'pwd' => 'test-password',
+            'data' => [['unq' => 'CMD-10001']],
+        ], $httpClient->lastJson());
+    }
 
-        parse_str((string) $request->getBody(), $form);
-        self::assertSame('test-user', $form['userid']);
-        self::assertSame('test-password', $form['pwd']);
-        self::assertSame('<msg><cmd></cmd></msg>', $form['msg']);
+    public function testPostJsonRejectsInvalidUtf8Payloads(): void
+    {
+        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response(''));
+
+        $this->expectException(\JsonException::class);
+
+        try {
+            $client->postJson('add_cmds.php', ['data' => [['unq' => "\xB1"]]]);
+        } finally {
+            self::assertNull($httpClient->lastRequest);
+        }
+    }
+
+    public function testPostFormSendsThePortalFieldNames(): void
+    {
+        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::pickup());
+
+        $client->postForm('request_pickup.php', ['pickup' => '5']);
+
+        $request = $httpClient->lastRequest;
+        self::assertNotNull($request);
+        self::assertSame('application/x-www-form-urlencoded', $request->getHeaderLine('Content-Type'));
+        self::assertSame(['user' => 'test-user', 'pwd' => 'test-password', 'pickup' => '5'], $httpClient->lastForm());
+    }
+
+    public function testGetSendsTheQueryString(): void
+    {
+        [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::history());
+
+        $client->get('awb_history.php', ['key' => 'track-key', 'awb' => 'BOK6000123456']);
+
+        $request = $httpClient->lastRequest;
+        self::assertNotNull($request);
+        self::assertSame('GET', $request->getMethod());
+        self::assertSame('https://portal.bookurier.ro/api/awb_history.php?key=track-key&awb=BOK6000123456', (string) $request->getUri());
     }
 
     public function testConfigTimeoutReachesTheTransport(): void
@@ -95,7 +163,7 @@ final class ClientTest extends TestCase
             config: new ClientConfig(userId: 'user', password: 'pass', timeout: 7.5),
         );
 
-        $client->post('get_stat.php', ['msg' => '<msg></msg>']);
+        $client->postJson('add_cmds.php', ['data' => []]);
 
         self::assertSame(7.5, $httpClient->lastTimeout);
     }
@@ -113,15 +181,11 @@ final class ClientTest extends TestCase
         self::assertSame(10.0, $client->getConfig()->timeout);
         self::assertSame('user', $derived->getConfig()->userId);
 
-        $derived->post('get_stat.php', ['msg' => '<msg></msg>']);
+        $derived->postForm('print_borderou.php');
 
         self::assertSame(30.0, $httpClient->lastTimeout);
-
-        $request = $httpClient->lastRequest;
-        self::assertNotNull($request);
-        parse_str((string) $request->getBody(), $form);
-        self::assertSame('user', $form['userid']);
-        self::assertSame('pass', $form['pwd']);
+        self::assertSame('user', $httpClient->lastForm()['user']);
+        self::assertSame('pass', $httpClient->lastForm()['pwd']);
     }
 
     public function testPerCallTimeoutOverridesTheConfigTimeout(): void
@@ -131,7 +195,7 @@ final class ClientTest extends TestCase
             config: new ClientConfig(userId: 'user', password: 'pass', timeout: 7.5),
         );
 
-        $client->post('get_stat.php', [], 2.0);
+        $client->postJson('add_cmds.php', [], 2.0);
 
         self::assertSame(2.0, $httpClient->lastTimeout);
     }
@@ -143,10 +207,10 @@ final class ClientTest extends TestCase
             config: new ClientConfig(userId: 'user', password: 'pass', baseUrl: 'https://example.test/api/'),
         );
 
-        $client->post('get_AWB.php');
+        $client->get('awb_history.php');
 
         self::assertNotNull($httpClient->lastRequest);
-        self::assertSame('https://example.test/api/get_AWB.php', (string) $httpClient->lastRequest->getUri());
+        self::assertSame('https://example.test/api/awb_history.php', (string) $httpClient->lastRequest->getUri());
     }
 
     public function testSetCredentialsReplacesTheConfig(): void
@@ -171,21 +235,19 @@ final class ClientTest extends TestCase
         self::assertSame($client->labels(), $client->labels());
         self::assertSame($client->reports(), $client->reports());
         self::assertSame($client->pickup(), $client->pickup());
+        self::assertSame($client->cities(), $client->cities());
     }
 
     public function testSendDoesNotInjectCredentialsIntoACallerRequest(): void
     {
         [$client, $httpClient] = TestClientFactory::create(static fn(): ResponseInterface => Fixture::response(''));
 
-        $request = $client->createRequest('POST', 'get_stat.php')
-            ->withBody((new HttpFactory())->createStream('msg=%3Cmsg%3E%3C%2Fmsg%3E'));
+        $request = $client->createRequest('GET', 'awb_history.php');
 
         $client->send($request);
 
         self::assertNotNull($httpClient->lastRequest);
-        parse_str((string) $httpClient->lastRequest->getBody(), $form);
-        self::assertArrayNotHasKey('userid', $form);
-        self::assertArrayNotHasKey('pwd', $form);
+        self::assertSame('', (string) $httpClient->lastRequest->getUri()->getQuery());
     }
 
     public function testForeignClientExceptionIsWrappedAsTransportException(): void
@@ -204,7 +266,7 @@ final class ClientTest extends TestCase
         $client = new Client($foreign, $factory, $factory, new ClientConfig(userId: 'user', password: 'pass'));
 
         try {
-            $client->send($client->createRequest('POST', 'get_stat.php'));
+            $client->get('awb_history.php');
 
             self::fail('Expected TransportException.');
         } catch (TransportException $e) {

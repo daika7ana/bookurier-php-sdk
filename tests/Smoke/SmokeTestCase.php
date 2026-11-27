@@ -11,8 +11,8 @@ use Daika7ana\Bookurier\Enums\ServiceType;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Live API base. Skipped unless BOOKURIER_TEST_USERNAME,
- * BOOKURIER_TEST_PASSWORD and BOOKURIER_TEST_CLIENT_ID are set.
+ * Live API base. Skipped unless BOOKURIER_TEST_USERNAME, BOOKURIER_TEST_PASSWORD
+ * and BOOKURIER_TEST_PICKUP_POINT are set.
  */
 abstract class SmokeTestCase extends TestCase
 {
@@ -20,17 +20,12 @@ abstract class SmokeTestCase extends TestCase
 
     protected function setUp(): void
     {
-        $username = getenv('BOOKURIER_TEST_USERNAME');
-        $password = getenv('BOOKURIER_TEST_PASSWORD');
+        foreach (['BOOKURIER_TEST_USERNAME', 'BOOKURIER_TEST_PASSWORD', 'BOOKURIER_TEST_PICKUP_POINT'] as $name) {
+            $value = getenv($name);
 
-        if ($username === false || $username === '' || $password === false || $password === '') {
-            $this->markTestSkipped('BOOKURIER_TEST_USERNAME and BOOKURIER_TEST_PASSWORD must be set to run live smoke tests.');
-        }
-
-        $clientId = getenv('BOOKURIER_TEST_CLIENT_ID');
-
-        if ($clientId === false || $clientId === '') {
-            $this->markTestSkipped('BOOKURIER_TEST_CLIENT_ID must be set: Bookurier requires a client code to create an order.');
+            if ($value === false || $value === '') {
+                $this->markTestSkipped($name . ' must be set to run live smoke tests.');
+            }
         }
     }
 
@@ -39,25 +34,26 @@ abstract class SmokeTestCase extends TestCase
         return $this->client ??= Client::create(config: new ClientConfig(
             userId: (string) getenv('BOOKURIER_TEST_USERNAME'),
             password: (string) getenv('BOOKURIER_TEST_PASSWORD'),
-            clientId: (int) getenv('BOOKURIER_TEST_CLIENT_ID'),
+            pickupPoint: (string) getenv('BOOKURIER_TEST_PICKUP_POINT'),
         ));
     }
 
     protected function requireWriteAccess(): void
     {
         if (getenv('BOOKURIER_TEST_ALLOW_WRITES') !== '1') {
-            $this->markTestSkipped('BOOKURIER_TEST_ALLOW_WRITES=1 is required: the smoke test writes live AWBs (and deletes them afterwards).');
+            $this->markTestSkipped('BOOKURIER_TEST_ALLOW_WRITES=1 is required: the smoke test creates live AWBs (there is no delete endpoint; unscanned AWBs are not billed).');
         }
     }
 
     protected function existingAwb(): string
     {
-        return $this->requiredEnv('BOOKURIER_TEST_AWB', 'an existing AWB');
-    }
+        $value = getenv('BOOKURIER_TEST_AWB');
 
-    protected function existingUniqueId(): string
-    {
-        return $this->requiredEnv('BOOKURIER_TEST_UNIQUE_ID', 'an existing order unique id');
+        if ($value === false || $value === '') {
+            $this->markTestSkipped('Skipping: BOOKURIER_TEST_AWB must be set to an existing AWB.');
+        }
+
+        return $value;
     }
 
     protected function order(string $uniqueId): Order
@@ -66,12 +62,13 @@ abstract class SmokeTestCase extends TestCase
             uniqueId: $uniqueId,
             recipientName: 'Smoke Test',
             phone: '0722123456',
-            city: 'București',
-            district: 'Sector 1',
+            city: 'Deva',
+            district: 'Hunedoara',
             street: 'Strada Testului',
             number: '1',
             service: ServiceType::National24,
             weight: 0.5,
+            zip: '330020',
         );
     }
 
@@ -79,16 +76,5 @@ abstract class SmokeTestCase extends TestCase
     protected function pause(): void
     {
         usleep(500_000);
-    }
-
-    private function requiredEnv(string $key, string $description): string
-    {
-        $value = getenv($key);
-
-        if ($value === false || $value === '') {
-            $this->markTestSkipped(sprintf('Skipping: %s must be set to %s.', $key, $description));
-        }
-
-        return $value;
     }
 }

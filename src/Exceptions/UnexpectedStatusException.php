@@ -8,7 +8,8 @@ use Daika7ana\Bookurier\DTOs\Common\Errors\BookurierError;
 use Psr\Http\Message\ResponseInterface;
 
 /**
- * Thrown when the response body does not match what the endpoint documents.
+ * Thrown when the response body does not match what the endpoint documents,
+ * or when the request is answered with HTTP 429 or any other non-2xx status.
  */
 class UnexpectedStatusException extends BookurierException
 {

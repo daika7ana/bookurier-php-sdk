@@ -35,4 +35,33 @@ final class FakeHttpClient implements HttpClientInterface
 
         return ($this->handler)($request);
     }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function lastJson(): array
+    {
+        if ($this->lastRequest === null) {
+            return [];
+        }
+
+        $decoded = json_decode((string) $this->lastRequest->getBody(), true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function lastForm(): array
+    {
+        if ($this->lastRequest === null) {
+            return [];
+        }
+
+        parse_str((string) $this->lastRequest->getBody(), $form);
+
+        /** @var array<string, string> $form */
+        return $form;
+    }
 }

@@ -1,12 +1,22 @@
 # Authentication
 
-Bookurier authenticates with the username and password of a Bookurier account.
-Both are sent as `userid` and `pwd` form fields on every POST. There is no API
-key, no OAuth exchange, no bearer token and no refresh flow.
+Bookurier's October 2026 portal API authenticates with the username and password
+of a portal account. There is no API key, OAuth exchange, bearer token or refresh
+flow.
 
-```text
-userid=your-bookurier-user&pwd=your-bookurier-password&msg=<msg><cmd>...</cmd></msg>
-```
+## Where credentials go
+
+| Endpoint | Transport | Credentials |
+|---|---|---|
+| `add_cmds.php` | JSON POST | `user` and `pwd` in the JSON body |
+| `print_awbs.php` | JSON POST | `user` and `pwd` in the JSON body |
+| `get_partner_cities.php` | JSON POST | `user` and `pwd` in the JSON body |
+| `request_pickup.php` | form POST | `user` and `pwd` form fields |
+| `print_borderou.php` | form POST | `user` and `pwd` form fields |
+| `awb_history.php` | GET | none; only the shared `key` tracking key |
+
+`Client::postJson()` and `Client::postForm()` add the credentials to every
+request. `Client::get()` and `Client::send()` do not.
 
 ## Providing credentials
 
@@ -15,51 +25,42 @@ use Daika7ana\Bookurier\Client;
 use Daika7ana\Bookurier\Config\ClientConfig;
 
 $client = Client::create(config: new ClientConfig(
-    userId: 'your-bookurier-user',
-    password: 'your-bookurier-password',
-    clientId: 1234, // your Bookurier client code
+    userId: 'your-portal-user',
+    password: 'your-portal-password',
+    pickupPoint: '5',
 ));
 ```
 
-Or through the environment. `Client::create()` with no `config` argument calls
-`ClientConfig::fromEnvironment()`:
+`userId` is the portal username; on the wire it is sent as `user`. The password
+is sent as `pwd`.
+
+Or through the environment:
 
 ```bash
-export BOOKURIER_USERNAME=your-bookurier-user
-export BOOKURIER_PASSWORD=your-bookurier-password
-export BOOKURIER_CLIENT_ID=1234
+export BOOKURIER_USERNAME=your-portal-user
+export BOOKURIER_PASSWORD=your-portal-password
+export BOOKURIER_PICKUP_POINT=5
 ```
 
-With those set, `Client::create()` needs no arguments.
+```php
+$client = Client::create(); // reads the variables above
+```
 
-| Variable | Maps to | Notes |
-|---|---|---|
-| `BOOKURIER_USERNAME` | `ClientConfig::$userId` | Preferred variable |
-| `BOOKURIER_USERID` | `ClientConfig::$userId` | Fallback read only when `BOOKURIER_USERNAME` is unset or empty |
-| `BOOKURIER_PASSWORD` | `ClientConfig::$password` | Required for any request |
-| `BOOKURIER_CLIENT_ID` | `ClientConfig::$clientId` | Cast to `int`; fills the `<client>` element |
-
-A non-integer `BOOKURIER_CLIENT_ID` throws `InvalidArgumentException`. For
-`BOOKURIER_BASE_URL`, `BOOKURIER_TIMEOUT` and the full default table, see
-[Configuration](CONFIGURATION.md#environment-variables).
-
+`Client::create()` with no `config` argument calls `ClientConfig::fromEnvironment()`.
 A `ClientConfig` you construct yourself does not read the environment.
 
-## The client code
+## Pickup point
 
-Order XML requires a `<client>` element carrying your Bookurier client code.
-`Order::$clientCode` is used when it is set; otherwise the SDK falls back to
-`ClientConfig::clientId`. With neither set, `orders()->create()` and
-`orders()->createBatch()` throw `InvalidArgumentException` before sending.
-
-`Order::toXml()` resolves the value as `clientCode ?? $defaultClientCode`, and the
-resources pass `ClientConfig::clientId` as that default. Pass `clientId` once on
-the config, or set `clientCode` per order when one integration submits for
-several Bookurier accounts.
+A portal account also has a pickup-point number. It is not an authentication
+credential, but every order needs one: `Order::$pickupPoint` or
+`ClientConfig::pickupPoint` (`BOOKURIER_PICKUP_POINT`). Without either,
+`orders()->create()` and `orders()->createBatch()` throw
+`InvalidArgumentException` before sending. `pickup()->request()` and
+`reports()->borderou()` use the configured pickup point as their default too.
 
 ## Missing credentials
 
-`Client::post()` throws
+`Client::postJson()` and `Client::postForm()` throw
 `Daika7ana\Bookurier\Exceptions\AuthenticationException` before sending when
 either value is empty:
 
@@ -67,28 +68,53 @@ either value is empty:
 use Daika7ana\Bookurier\Exceptions\AuthenticationException;
 
 try {
-    $client->orders()->status('BOK3925457');
+    $client->cities()->partnerCities();
 } catch (AuthenticationException $e) {
     // userId or password is empty; nothing was sent.
 }
 ```
 
-The check lives in `post()`; `Client::send()` transmits a request you built
-yourself and adds no credentials. Replace credentials at runtime with
+`Client::get()` does not check credentials, because `awb_history.php` is public.
+`Client::send()` transmits a request you built yourself and adds no credentials.
+Replace credentials at runtime with
 `$client->setCredentials('new-user', 'new-password')`, which updates the client in
 place.
 
 ## Rejected requests
 
-Bookurier answers HTTP 200 and puts a negative code in the body. The SDK raises
-`AuthenticationException` for `-1` and `ValidationException` for `-2`, `-3` and
-`-5`, naming the code. `-1` is generic: it does not distinguish a wrong password
-from a bad payload. Check the credentials first, then the XML body. The per-code
-table lives in [Error Codes](ERRORS.md#error-codes).
+Bookurier answers HTTP 200 with a JSON body such as:
+
+```json
+{"status": "error", "message": "Invalid user"}
+```
+
+The SDK raises `AuthenticationException` when the message contains
+`Invalid user` or `Login fail` (case-insensitive), and `ValidationException` for
+every other `status: "error"` message. HTTP 401 also raises
+`AuthenticationException`.
+
+There is no negative-code error model in this API. The JSON message is the only
+error detail; the attached `BookurierError` carries the message and has
+`code = 0`.
+
+## Tracking key
+
+`awb_history.php` needs no account credentials. It needs the shared tracking key,
+sent as the `key` query parameter:
+
+```text
+GET https://portal.bookurier.ro/api/awb_history.php?key=...&awb=BOK6000123456
+```
+
+`ClientConfig::DEFAULT_TRACKING_KEY` supplies the vendor's default
+(`7BzvpY3PuANhhMajURYWn`). Override it with `ClientConfig::$trackingKey` or
+`BOOKURIER_TRACKING_KEY` when Bookurier issues you a different key. The key is
+shared with the public history endpoint; treat it as configuration, not as a
+per-account secret.
 
 ## Redaction
 
-The password travels as a plain form field, protected only by HTTPS. Redact
-`userid`, `pwd` and full request bodies from logs, exception trackers and HTTP
-dumps. The SDK does not log requests itself, but a PSR-18 middleware or Guzzle
-handler you add can.
+The password travels in a plain JSON or form field, protected only by HTTPS.
+Redact `user`, `pwd`, the tracking key and full request bodies from logs,
+exception trackers and HTTP dumps. The SDK does not log requests itself, but a
+PSR-18 middleware or Guzzle handler you add can.

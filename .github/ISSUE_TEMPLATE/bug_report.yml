@@ -53,7 +53,7 @@ body:
     id: sdk-version
     attributes:
       label: SDK version
-      placeholder: e.g. 1.0.0
+      placeholder: e.g. 2.0.0
     validations:
       required: true
   - type: input
@@ -75,12 +75,12 @@ body:
       label: Affected API area
       options:
         - Authentication
-        - Orders (create / status / history)
+        - Orders (create / batch / history)
         - Batch orders
         - Labels / documents
         - Reports (bordero)
         - Pickup (experimental)
-        - XML mapping / DTOs
+        - Order payload / DTOs
         - HTTP client / transport
         - Documentation
         - Other

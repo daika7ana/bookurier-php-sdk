@@ -9,7 +9,8 @@ use Psr\Http\Message\ResponseInterface;
 use Throwable;
 
 /**
- * Thrown when the credentials are missing, or when Bookurier answers `-1`.
+ * Thrown when the credentials are missing, Bookurier answers "Invalid user" / "Login fail",
+ * or the request is answered with HTTP 401.
  */
 class AuthenticationException extends BookurierException
 {

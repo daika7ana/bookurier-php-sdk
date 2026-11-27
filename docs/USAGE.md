@@ -7,18 +7,16 @@ use Daika7ana\Bookurier\Client;
 use Daika7ana\Bookurier\Config\ClientConfig;
 
 $client = Client::create(config: new ClientConfig(
-    userId: 'your-bookurier-user',
-    password: 'your-bookurier-password',
-    clientId: 1234,
+    userId: 'your-portal-user',
+    password: 'your-portal-password',
+    pickupPoint: '5',
 ));
 ```
 
-## Create an Order
+`pickupPoint` is the portal pickup-point number. `Order::$pickupPoint` overrides
+it per order.
 
-`Order` is a `final readonly` request DTO. `uniqueId` is your own order
-identifier. Bookurier does **not** enforce it as unique — submitting the same
-`uniqueId` twice creates two orders — so keep it unique in your own system to
-correlate status, history and labels.
+## Create an order
 
 ```php
 use Daika7ana\Bookurier\DTOs\Order\Order;
@@ -27,135 +25,121 @@ use Daika7ana\Bookurier\Enums\ServiceType;
 $order = new Order(
     uniqueId: 'A1',
     recipientName: 'Ionescu Vasile',
-    phone: '0744-666847',
+    phone: '0744666847',
     city: 'Bucuresti',
     street: 'Nicolae Oncescu nr. 6',
-
     service: ServiceType::Bucharest24h,
     weight: 0.5,
-    packages: 1,
-    district: 'Sect 1',
-    email: 'IV@yahoo.com',
-    block: '114',
-    entrance: '1',
-    floor: '7',
-    apartment: '29',
-    interphone: '29',
+    district: 'Sector 1',
     cashOnDelivery: 100.65,
     notes: 'De sunat cu 1/2 inainte',
 );
 
 $awb = $client->orders()->create($order);
 
-echo $awb; // e.g. BOK3925457
+// Persist the AWB now: labels, history and every later call use it.
 ```
 
-Optional address and shipment fields may be omitted. Null optional values are not
-sent; booleans are sent as `1` or `0`. `country` defaults to `Romania` and
-`packages` defaults to `1`. `cashOnDelivery` and `insuredValue` are amounts in
-RON. `clientCode` is your Bookurier client code; when it is `null` the value of
-`ClientConfig::clientId` is used, and with neither set `create()` throws
-`InvalidArgumentException` before sending.
+`create()` returns the AWB as a string, for example `BOK6000123456`. There are no
+by-unique-id lookups, so an AWB you do not persist cannot be recovered through
+the SDK. `uniqueId` is your correlation id, not a deduplication key: two separate
+calls with the same value create two orders.
 
-`create()` returns the AWB as a string. Formats vary server-side by destination
-county and service: `BOK` plus seven digits (`BOK3925457`), twelve digits
-(`062568455929`), or `CKC` plus six digits for Bucharest Today
-(`CKC122336`). The SDK treats the AWB as an opaque string and validates with the
-lenient `/^[A-Za-z]{0,4}\d{3,}$/`. A body matching `/^-\d+$/` raises
-`AuthenticationException` for `-1`, `ValidationException` for `-2`, `-3` and
-`-5`, and `UnexpectedStatusException` for any other negative code or any other
-non-AWB body.
+`district` is required in practice: a county, or `Sector 1`..`Sector 6` for
+Bucharest. An empty value throws `InvalidArgumentException` before sending.
 
-## Create Several Orders
+Field-level wire names and vendor length limits are in [DTOs](DTOS.md#order-request-dto).
 
-`createBatch()` accepts a non-empty list of `Order` objects:
+## Create a batch
 
 ```php
-$references = $client->orders()->createBatch([
+$result = $client->orders()->createBatch([
     $order,
     new Order(
         uniqueId: 'A2',
         recipientName: 'Popescu Maria',
-        phone: '0745-123456',
+        phone: '0745123456',
         city: 'Cluj-Napoca',
         street: 'Memorandumului nr. 12',
-
         service: ServiceType::National24,
         weight: 1.2,
         district: 'Cluj',
     ),
 ]);
 
-foreach ($references as $reference) {
+foreach ($result->references() as $reference) {
     echo $reference->uniqueId, ' => ', $reference->awb, PHP_EOL;
 }
-```
 
-The result is a `Daika7ana\SimpleCollections\Collection` of `OrderReference`
-objects. An empty array, two orders sharing a non-empty `uniqueId`, or a missing
-client code throw `InvalidArgumentException` before any request is made.
-
-Bookurier answers the batch call with a comma separated AWB list
-(`<msg><cmds>BOK1,BOK2</cmds></msg>`) and does not echo your `unq`, so the SDK
-pairs each AWB with the order at the same position. A non-empty `<err>` raises
-`ValidationException`; a missing `<cmds>`, mismatched counts, or a malformed AWB raises
-`UnexpectedStatusException` — check the daily label list before retrying,
-because the orders may already exist. The positional-pairing rule is documented
-canonically in [Resources](RESOURCES.md#createbatcharray-orders-collection).
-
-## Read Status and History
-
-Look up by AWB or by your own `uniqueId`:
-
-```php
-$status = $client->orders()->status($awb);
-
-echo $status->uniqueId;          // your order id
-echo $status->awb;               // Bookurier AWB
-echo $status->statusId;          // integer status code
-echo $status->statusDescription; // human-readable status
-echo $status->observations;      // ?string
-
-$sameStatus = $client->orders()->statusByUniqueId('A1');
-```
-
-History returns every recorded status change:
-
-```php
-$history = $client->orders()->historyByUniqueId('A1');
-
-foreach ($history as $entry) {
-    echo $entry->date ?? '', ' ', $entry->statusDescription, PHP_EOL;
+foreach ($result->errors() as $error) {
+    echo $error->order, ': ', $error->message;
+    echo $error->suggestion === null ? '' : ' ' . $error->suggestion;
+    echo PHP_EOL;
 }
 ```
 
-`HistoryEntry::$date` is the raw `Y-m-d H:i:s` string Bookurier sends, with no
-timezone attached. `HistoryEntry::$observations` and `$date` are `null` when the
-element is empty.
+`createBatch()` posts all orders in one `add_cmds.php` call and returns a
+`BatchResult`:
 
-`historyByUniqueId()` is the working history endpoint. `history($awb)` answers
-`-2` on the live service even for a valid AWB; see the canonical note in
-[Resources](RESOURCES.md#historystring-awb-collection). `status($awb)` and
-`statusByUniqueId()` do work.
+| Member | Meaning |
+|---|---|
+| `references()` | `Collection<OrderReference>` for every order the response map names |
+| `errors()` | `Collection<OrderError>` for orders the service rejected |
+| `hasErrors()` | `true` when `errors()` is not empty |
 
-`statusByUniqueId()` and `historyByUniqueId()` take the same `uniqueId` you sent
-when creating the order.
+Partial success is normal: some orders can receive AWBs while others are
+rejected. Always inspect `hasErrors()` and process both lists; do not treat a
+returned `BatchResult` as all-or-nothing. Per-order failures are not thrown as
+exceptions. A top-level JSON error envelope still raises the usual SDK
+exceptions.
 
-## Delete an Order
+Local argument errors:
+
+- an empty list throws `InvalidArgumentException`;
+- two orders with the same non-empty `uniqueId` throw
+  `InvalidArgumentException`, because the response map is keyed by `unq`;
+- a missing pickup point or empty `district` throws `InvalidArgumentException`
+  before sending.
+
+## Read history and current status
+
+A freshly created AWB has no tracking events yet: expect an empty list until the parcel is scanned.
 
 ```php
-$client->orders()->delete($awb);          // by AWB
-$client->orders()->deleteByUniqueId('A1'); // by your order id
+$history = $client->orders()->history($awb);
+
+foreach ($history as $event) {
+    echo $event->date, ' ', $event->statusName, PHP_EOL;
+}
+
+$events = $history->all();
+$current = $events === [] ? null : $events[count($events) - 1];
 ```
 
-Both methods return `void`. Bookurier must answer `1`; a body matching `/^-\d+$/`
-raises `AuthenticationException` for `-1` and `ValidationException` for `-2`,
-`-3` and `-5`; any other body, including another negative code, is reported as
-`UnexpectedStatusException`.
+The vendor returns events chronologically, so the last event is the current
+status. `HistoryEvent::status()` returns a `Status` enum or `null`:
 
-## Labels and Documents
+```php
+if ($current !== null) {
+    echo $current->statusName, PHP_EOL;
+    echo $current->status()?->name ?? 'partner text', PHP_EOL;
 
-Labels are returned as `Daika7ana\Bookurier\Support\Document` objects:
+    if ($current->status()?->isFinal()) {
+        // Stop polling.
+    }
+}
+```
+
+An empty `status_id` means partner-courier free text; `statusName` still carries
+the message and `status()` returns `null`. Non-numeric and unknown numeric ids
+also return `null`. See the [Status enum](DTOS.md#status-enum) for ids and final
+states.
+
+`history($awb)` is a public GET: it needs the tracking key, not the account
+credentials. The configured key is `ClientConfig::$trackingKey`, falling back to
+`ClientConfig::DEFAULT_TRACKING_KEY`.
+
+## Labels
 
 ```php
 $pdf = $client->labels()->pdf($awb);
@@ -165,54 +149,93 @@ $html = $client->labels()->html($awb);
 file_put_contents("awb-{$awb}.html", $html->contents);
 ```
 
-The same label can be fetched by your own order id:
+Both methods accept one AWB or a list:
 
 ```php
-$pdf = $client->labels()->pdfByUniqueId('A1');
-$html = $client->labels()->htmlByUniqueId('A1');
+$pdf = $client->labels()->pdf([$awb1, $awb2], 'm', 0);
 ```
 
-`Document` exposes `$contents`, `$mimeType` and `isPdf()`; the field reference is
-in [DTOs](DTOS.md#document).
+| Argument | Default | Meaning |
+|---|---|---|
+| `$awbs` | required | One AWB or a list of AWBs |
+| `$mode` | `null` | `'s'` or `'m'`; when null the field is omitted and the vendor default (`m`) applies |
+| `$page` | `0` | Passed to the vendor as `page` |
 
-`isPdf()` inspects the body, not `$mimeType`. The `pdf()` and `pdfByUniqueId()`
-methods reject a body that does not start with `%PDF` with
-`UnexpectedStatusException`; the check remains useful for any document you
-receive through another path.
+`labels()->pdf()` requires a body starting with `%PDF`; a non-PDF body raises
+`UnexpectedStatusException`. `labels()->html()` returns the body as-is.
+`Document::isPdf()` sniffs the body, not the header.
 
-## Daily Labels, Bordero and Pickup
+## Bordero
 
 ```php
-$labels = $client->labels()->daily();       // all labels for the day, HTML
-$bordero = $client->reports()->dailyBordero(); // daily order list, HTML
-$pickup = $client->pickup()->request();      // courier pickup bordero, HTML
+$document = $client->reports()->borderou('2026-11-26');
+
+file_put_contents('bordero.html', $document->contents);
 ```
 
-All three return `Document`. Write `$document->contents` to a file or pass the
-string to your own renderer. The pickup bordero is HTML; the endpoint does not
-send a separate request body, so the SDK posts only `userid` and `pwd`.
+The date is required and accepts `yyyy-mm-dd` or `dd-mm-yyyy`. The return value is
+an HTML `Document`. The pickup point defaults to `ClientConfig::pickupPoint`; pass
+one explicitly to override it. `borderou()` also accepts a per-call timeout:
 
-`pickup()->request()` is `@experimental`: it dispatches a physical courier, has
-never been exercised against the live service, and is covered by unit tests only.
+```php
+$document = $client->reports()->borderou('2026-11-26', '5', 15.0);
+```
 
-## Low-Level Requests
+## Partner cities
 
-The client exposes the form POST it uses internally:
+```php
+$cities = $client->cities()->partnerCities('Prahova');
+
+foreach ($cities as $city) {
+    echo $city->city, ' ', $city->district, ' ', $city->zip, PHP_EOL;
+}
+```
+
+`partnerCities()` returns `Collection<PartnerCity>` for partner-served cities.
+Bucharest and Ilfov are excluded. Pass a district to filter; the filter is
+diacritics-insensitive. Omit it for the full list.
+
+## Pickup
+
+```php
+$message = $client->pickup()->request(); // @experimental
+```
+
+`request()` posts the pickup point to `request_pickup.php` and returns the
+confirmation message string. It dispatches a physical courier, has never been
+exercised against the live service, and is covered by unit tests only. Never
+auto-retry it. The pickup point defaults to `ClientConfig::pickupPoint`; pass one
+explicitly to override it.
+
+## Cancellation
+
+There is no delete or cancellation endpoint. An AWB that never enters the courier
+network is not billed. If a shipment must be abandoned, do not hand the parcel to
+the courier and mark the AWB ignored in your own system.
+
+## Low-level requests
+
+The client exposes the request builders it uses internally:
 
 ```php
 use Psr\Http\Message\ResponseInterface;
 
-$response = $client->post('get_AWB_list.php', timeout: 15.0);
+$response = $client->postForm(
+    'print_borderou.php',
+    ['pickup' => '5', 'filter_date' => '2026-11-26'],
+    timeout: 30.0,
+);
 
 assert($response instanceof ResponseInterface);
 echo (string) $response->getBody();
 ```
 
-`Client::post()` adds credentials and returns an unparsed PSR-7 response. Use it
-for an endpoint the SDK does not wrap, or when you need a per-call timeout. The
-resource methods are preferable when one exists, because they map the body to
-typed objects and raise the SDK exceptions.
+| Method | Credentials | Body |
+|---|---|---|
+| `postJson(string $endpoint, array $payload, ?float $timeout = null)` | `user` / `pwd` added | JSON |
+| `postForm(string $endpoint, array $fields = [], ?float $timeout = null)` | `user` / `pwd` added | form-encoded |
+| `get(string $endpoint, array $query = [], ?float $timeout = null)` | none | query string |
+| `send(RequestInterface $request, ?float $timeout = null)` | none | as supplied |
 
-`Client::send()` sends a `Psr\Http\Message\RequestInterface` you built yourself.
-It does not add credentials; use `Client::post()` unless you are supplying a fully
-formed request.
+These methods return an unparsed PSR-7 response. Use a resource method when one
+exists: it maps the body to typed objects and raises the SDK exceptions.

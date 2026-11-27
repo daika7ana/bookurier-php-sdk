@@ -1,311 +1,230 @@
 # Resources
 
-All endpoints are `POST` form submissions relative to
-`https://www.bookurier.ro/colete/serv`. Every request carries `userid`, `pwd` and,
-where the endpoint takes input, a `msg` XML string. The client returns the
-response body to the resource method, which maps it to a typed value.
+All endpoints are relative to `https://portal.bookurier.ro/api`. Account
+endpoints receive the portal `user` and `pwd`; `awb_history.php` is a public GET
+that needs only the tracking key.
 
 Every resource method below can throw:
 
-- `Daika7ana\Bookurier\Exceptions\AuthenticationException` — `userId` or
-  `password` is empty (thrown before a request is sent), or Bookurier answered
-  `-1`.
+- `Daika7ana\Bookurier\Exceptions\AuthenticationException` — credentials are
+  missing (before sending), the portal answers `Invalid user` / `Login fail`, or
+  HTTP 401.
+- `Daika7ana\Bookurier\Exceptions\ValidationException` — the portal answers any
+  other JSON `status: "error"` message, or HTTP 400/422.
 - `Daika7ana\Bookurier\Exceptions\TransportException` — the HTTP transport failed.
-- `Daika7ana\Bookurier\Exceptions\ValidationException` — Bookurier answered
-  `-2`, `-3` or `-5`, or a non-empty `<err>` on an XML endpoint.
-- `Daika7ana\Bookurier\Exceptions\UnexpectedStatusException` — the body was
-  empty, could not be parsed, was a bot-filter challenge page, or was not the
-  documented success value.
+- `Daika7ana\Bookurier\Exceptions\UnexpectedStatusException` — an unexpected
+  body, a challenge page, a rate limit, or a missing AWB.
 
-The lists below name additional exceptions where they apply. See
-[ERRORS.md](ERRORS.md) for the response-classification rules.
+Local argument errors throw `InvalidArgumentException` and send nothing. See
+[ERRORS.md](ERRORS.md) for the classification rules.
 
 Examples assume `$client` is configured as in the
 [README quick start](../README.md#quick-start).
 
-Bookurier publishes no sandbox and no OpenAPI schema. The payloads and return
-shapes here follow the documentation and the SDK implementation, as checked
-against the live service.
+## Endpoint map
+
+| Resource | Method | Endpoint | Transport |
+|---|---|---|---|
+| `orders()` | `create`, `createBatch` | `add_cmds.php` | JSON POST |
+| `orders()` | `history` | `awb_history.php` | public GET |
+| `labels()` | `pdf`, `html` | `print_awbs.php` | JSON POST |
+| `reports()` | `borderou` | `print_borderou.php` | form POST |
+| `pickup()` | `request` | `request_pickup.php` | form POST |
+| `cities()` | `partnerCities` | `get_partner_cities.php` | JSON POST |
+
+There is no cancellation/delete endpoint and no standalone status endpoint.
 
 ## Orders — `$client->orders()`
 
-| Method | Endpoint | Returns |
-|---|---|---|
-| `create(Order $order)` | `add_cmd.php` | `string` (AWB) |
-| `createBatch(array $orders)` | `add_cmds.php` | `Collection<int, OrderReference>` |
-| `delete(string $awb)` | `del_cmd.php` | `void` |
-| `deleteByUniqueId(string $uniqueId)` | `del_cmd_unq.php` | `void` |
-| `status(string $awb)` | `get_stat.php` | `OrderStatus` |
-| `statusByUniqueId(string $uniqueId)` | `get_stat_unq.php` | `OrderStatus` |
-| `history(string $awb)` | `get_history.php` | `Collection<int, HistoryEntry>` |
-| `historyByUniqueId(string $uniqueId)` | `get_history_unq.php` | `Collection<int, HistoryEntry>` |
+| Method | Returns |
+|---|---|
+| `create(Order $order)` | `string` (AWB) |
+| `createBatch(array $orders)` | `BatchResult` |
+| `history(string $awb)` | `Collection<int, HistoryEvent>` |
 
 ### `create(Order $order): string`
 
-Creates one order and returns the generated AWB.
+Creates one order and returns its AWB.
 
-- **Endpoint:** `add_cmd.php`
-- **Form:** `msg=<msg><cmd>...</cmd></msg>`
-- **Parameters:** `$order` — a populated `Order` DTO. The `<client>` element comes
-  from `Order::$clientCode`, or from `ClientConfig::clientId` when that is null;
-  with neither set the call throws `InvalidArgumentException` before sending.
-  `Order::$district` (sector or county) is required too: an empty value throws
-  `InvalidArgumentException` locally, and the service answers `-5` if it reaches
-  the API.
-- **Returns:** the AWB as a string. Formats vary server-side by destination
-  county and service: `BOK` plus seven digits (`BOK3925457`), twelve digits
-  (`062568455929`), or `CKC` plus six digits for Bucharest Today service `7`
-  (`CKC122336`). The SDK treats the AWB as an opaque string and validates with
-  the lenient `/^[A-Za-z]{0,4}\d{3,}$/`.
-- **Throws:** `AuthenticationException`, `ValidationException`, `TransportException`,
-  `InvalidArgumentException` (no client code or empty district), and `UnexpectedStatusException`
-  when the body is not a negative code and does not match the AWB pattern.
-  Negative codes raise `AuthenticationException` for `-1`, `ValidationException`
-  for `-2`, `-3` and `-5`, and `UnexpectedStatusException` for any other code
-  (see [Errors](ERRORS.md)).
+- **Endpoint:** `add_cmds.php`, JSON `{"data": [order]}`.
+- **Required:** a pickup point (`Order::$pickupPoint` or
+  `ClientConfig::pickupPoint`) and a non-empty `district`. Either missing throws
+  `InvalidArgumentException` before sending.
+- **Returns:** the AWB, for example `BOK6000123456`. Treat it as opaque; the SDK
+  does not validate the pattern.
+- **Persist it immediately.** Labels and history are AWB-only; there are no
+  by-unique-id lookups.
+- **Per-order error:** if the response `errors` list names the order, `create()`
+  throws `ValidationException` with the message and suggestion appended.
+- **Missing AWB:** a success envelope with neither a map entry for the order nor
+  a first `data` AWB raises `UnexpectedStatusException`.
 
 ```php
+use Daika7ana\Bookurier\DTOs\Order\Order;
+use Daika7ana\Bookurier\Enums\ServiceType;
+
 $awb = $client->orders()->create(new Order(
     uniqueId: 'A1',
     recipientName: 'Ionescu Vasile',
-    phone: '0744-666847',
+    phone: '0744666847',
     city: 'Bucuresti',
     street: 'Nicolae Oncescu nr. 6',
-
     service: ServiceType::Bucharest24h,
     weight: 0.5,
+    district: 'Sector 1',
 ));
 ```
 
-### `createBatch(array $orders): Collection`
+### `createBatch(array $orders): BatchResult`
 
 Creates several orders in one call.
 
-- **Endpoint:** `add_cmds.php`
-- **Form:** `msg=<msg><cmds><cmd>...</cmd><cmd>...</cmd></cmds></msg>`
-- **Parameters:** `$orders` — a non-empty list of `Order` objects with distinct
-  `uniqueId` values. The resolved client code rules are the same as `create()`.
-- **Returns:** `Collection<int, OrderReference>` with one entry per order, in the
-  order you sent them.
-- **Throws:** `AuthenticationException`, `ValidationException`, `TransportException`,
-  `UnexpectedStatusException`, and `InvalidArgumentException` when `$orders` is
-  empty, two entries share a non-empty `uniqueId`, or no client code is available.
-- **Body handling:** a non-empty `<err>` raises `ValidationException` (even when
-  `<cmds>` is also present). Otherwise the API answers
-  `<msg><cmds>BOK1,BOK2</cmds></msg>` — a comma separated list of AWBs with no
-  `unq` echoed. A missing `<cmds>` element raises `UnexpectedStatusException`
-  before pairing, as does an AWB count that does not match the input list or a
-  malformed AWB.
+- **Endpoint:** `add_cmds.php`, JSON `{"data": [order, order, ...]}`.
+- **Parameters:** a non-empty list of `Order` objects. Each needs a pickup point
+  and a non-empty `district`.
+- **Returns:** `BatchResult` with `references()`, `errors()` and `hasErrors()`.
+  The response map is keyed by `unq`, so `references()` contains one
+  `OrderReference` per order the map names.
+- **Partial success:** expected. Some orders can get AWBs while others are
+  rejected. Process both `references()` and `errors()`; per-order failures are
+  not thrown.
+- **Local errors:** an empty list, or two orders sharing a non-empty `uniqueId`,
+  throws `InvalidArgumentException` before sending. The duplicate check exists
+  because the response map cannot distinguish two identical `unq` values.
+- **Top-level errors:** a JSON error envelope, an authentication failure, a
+  transport failure or an unexpected body still throws instead of returning a
+  result.
 
 ```php
-$references = $client->orders()->createBatch([$order, $secondOrder]);
+$result = $client->orders()->createBatch([$firstOrder, $secondOrder]);
 
-foreach ($references as $reference) {
+foreach ($result->references() as $reference) {
     echo $reference->uniqueId, ' => ', $reference->awb, PHP_EOL;
 }
+
+if ($result->hasErrors()) {
+    foreach ($result->errors() as $error) {
+        echo $error->order, ': ', $error->message, PHP_EOL;
+    }
+}
 ```
-
-### `delete(string $awb): void`
-
-Deletes an order by AWB.
-
-- **Endpoint:** `del_cmd.php`
-- **Form:** `msg=<msg><cmd><awb>...</awb></cmd></msg>`
-- **Parameters:** `$awb` — the complete AWB.
-- **Returns:** `void`.
-- **Throws:** the four common exceptions listed above.
-- **Body handling:** Bookurier must answer `1`. A negative body raises by code
-  (`-1` → `AuthenticationException`, `-2`/`-3`/`-5` → `ValidationException`, any
-  other code → `UnexpectedStatusException`); any other non-`1` body raises
-  `UnexpectedStatusException`.
-
-### `deleteByUniqueId(string $uniqueId): void`
-
-Deletes an order by your own order id.
-
-- **Endpoint:** `del_cmd_unq.php`
-- **Form:** `msg=<msg><cmd><unq>...</unq></cmd></msg>`
-- **Parameters:** `$uniqueId` — the `uniqueId` you sent when creating the order.
-- **Returns:** `void`.
-- **Throws:** the four common exceptions listed above.
-- **Body handling:** same as `delete()`.
-
-### `status(string $awb): OrderStatus`
-
-Returns the current status of an order.
-
-- **Endpoint:** `get_stat.php`
-- **Form:** `msg=<msg><cmd><awb>...</awb></cmd></msg>`
-- **Parameters:** `$awb` — the complete AWB.
-- **Returns:** `OrderStatus`.
-- **Throws:** the four common exceptions listed above.
-- **Body handling:** parsed as XML. A non-empty `<err>` raises `ValidationException`.
-
-### `statusByUniqueId(string $uniqueId): OrderStatus`
-
-Returns the current status by your own order id.
-
-- **Endpoint:** `get_stat_unq.php`
-- **Form:** `msg=<msg><cmd><unq>...</unq></cmd></msg>`
-- **Parameters:** `$uniqueId` — your order id.
-- **Returns:** `OrderStatus`.
-- **Throws:** the four common exceptions listed above.
 
 ### `history(string $awb): Collection`
 
-Returns every recorded status change for an order.
+Returns every recorded event for an AWB.
 
-- **Endpoint:** `get_history.php`
-- **Form:** `msg=<msg><cmd><awb>...</awb></cmd></msg>`
-- **Parameters:** `$awb` — the complete AWB.
-- **Returns:** `Collection<int, HistoryEntry>`.
-- **Throws:** the four common exceptions listed above.
-- **Body handling:** parsed as XML. A non-empty `<err>` raises `ValidationException`.
-- **Known limitation:** the live service answers `-2` on this endpoint even for a
-  valid AWB, so it raises `ValidationException`. Use `historyByUniqueId()` instead.
+- **Endpoint:** `awb_history.php?key=<tracking-key>&awb=<awb>`, public GET.
+- **Credentials:** none. The key is `ClientConfig::$trackingKey`, falling back to
+  `ClientConfig::DEFAULT_TRACKING_KEY`.
+- **Returns:** `Collection<int, HistoryEvent>`, chronological; the last event is
+  the current status.
+- **Partner text:** an empty `status_id` means partner-courier free text.
+  `statusName` carries the message and `status()` returns `null`. Non-numeric and
+  unknown numeric ids also return `null`.
+- **Final states:** `Status::isFinal()` covers `NotPicked`, `Completed`,
+  `ReturnToSenderConfirmed`, `RefundPaid`, `Delivered` and `ReturnCompleted`.
+  Stop polling once the latest event resolves to one.
 
 ```php
-foreach ($client->orders()->history($awb) as $entry) {
-    echo $entry->date ?? '', ' ', $entry->statusDescription, PHP_EOL;
-}
+$events = $client->orders()->history($awb)->all();
+$current = $events === [] ? null : $events[count($events) - 1];
 ```
-
-### `historyByUniqueId(string $uniqueId): Collection`
-
-Returns the status history by your own order id.
-
-- **Endpoint:** `get_history_unq.php`
-- **Form:** `msg=<msg><cmd><unq>...</unq></cmd></msg>`
-- **Parameters:** `$uniqueId` — your order id.
-- **Returns:** `Collection<int, HistoryEntry>`.
-- **Throws:** the four common exceptions listed above.
 
 ## Labels — `$client->labels()`
 
-| Method | Endpoint | Returns |
-|---|---|---|
-| `html(string $awb)` | `get_AWB.php` | `Document` |
-| `pdf(string $awb)` | `get_AWB_pdf.php` | `Document` |
-| `htmlByUniqueId(string $uniqueId)` | `get_AWB_unq.php` | `Document` |
-| `pdfByUniqueId(string $uniqueId)` | `get_AWB_unq_pdf.php` | `Document` |
-| `daily()` | `get_AWB_list.php` | `Document` |
+| Method | Returns |
+|---|---|
+| `pdf(string\|array $awbs, ?string $mode = null, int $page = 0)` | `Document` |
+| `html(string\|array $awbs, ?string $mode = null, int $page = 0)` | `Document` |
 
-### `html(string $awb): Document`
+Both methods post JSON to `print_awbs.php` with `data` (one AWB or a list),
+`format` (`pdf` or `html`), `page`, and `mode` when it is not `null`.
 
-Returns the AWB label as HTML.
+- **`$mode`:** `'s'` or `'m'`. When `null`, the field is omitted and the vendor
+  default (`m`) applies.
+- **`$page`:** defaults to `0`.
+- **Returns:** a `Document` whose `contents` is the raw body.
+- **PDF guard:** `pdf()` rejects a body that does not start with `%PDF` with
+  `UnexpectedStatusException`.
+- **Errors:** a JSON error envelope raises `AuthenticationException` or
+  `ValidationException`; an empty body, JSON success body or challenge page
+  raises `UnexpectedStatusException`.
 
-- **Endpoint:** `get_AWB.php`
-- **Form:** `msg=<msg><cmd><awb>...</awb></cmd></msg>`
-- **Parameters:** `$awb` — the complete AWB.
-- **Returns:** `Document` with the raw HTML body.
-- **Throws:** the four common exceptions listed above.
-- **Body handling:** a trimmed body matching `/^-\d+$/` raises by code (`-1` →
-  `AuthenticationException`, `-2`/`-3`/`-5` → `ValidationException`, any other
-  code → `UnexpectedStatusException`); an empty body or the host's HTML challenge
-  page raises `UnexpectedStatusException`. Any other body is returned as a
-  `Document`.
+```php
+$label = $client->labels()->pdf($awb);
+file_put_contents("awb-{$awb}.pdf", $label->contents);
 
-### `pdf(string $awb): Document`
-
-Returns the AWB label as PDF.
-
-- **Endpoint:** `get_AWB_pdf.php`
-- **Form:** `msg=<msg><cmd><awb>...</awb></cmd></msg>`
-- **Parameters:** `$awb` — the complete AWB.
-- **Returns:** `Document` with the raw PDF body.
-- **Throws:** the four common exceptions listed above.
-- **Body handling:** same as `html()`, but the body must also begin with `%PDF`
-  after leading whitespace; otherwise `UnexpectedStatusException` is thrown.
-  `Document::isPdf()` reflects the same check.
-
-### `htmlByUniqueId(string $uniqueId): Document`
-
-Returns the AWB label as HTML by your own order id.
-
-- **Endpoint:** `get_AWB_unq.php`
-- **Form:** `msg=<msg><cmd><unq>...</unq></cmd></msg>`
-- **Parameters:** `$uniqueId` — your order id.
-- **Returns:** `Document`.
-- **Throws:** the four common exceptions listed above.
-- **Body handling:** same as `html()`.
-
-### `pdfByUniqueId(string $uniqueId): Document`
-
-Returns the AWB label as PDF by your own order id.
-
-- **Endpoint:** `get_AWB_unq_pdf.php`
-- **Form:** `msg=<msg><cmd><unq>...</unq></cmd></msg>`
-- **Parameters:** `$uniqueId` — your order id.
-- **Returns:** `Document`.
-- **Throws:** the four common exceptions listed above.
-- **Body handling:** same as `pdf()`.
-
-### `daily(): Document`
-
-Returns the printable labels for every order of the day in one HTML document.
-
-- **Endpoint:** `get_AWB_list.php`
-- **Form:** `userid` and `pwd` only.
-- **Returns:** `Document` whose `mimeType` is the response `Content-Type`, or
-  `application/octet-stream` when the header is absent.
-- **Throws:** the four common exceptions listed above.
-- **Body handling:** same as `html()`.
+$labels = $client->labels()->html([$awb1, $awb2], 'm', 0);
+```
 
 ## Reports — `$client->reports()`
 
-### `dailyBordero(): Document`
+### `borderou(string $date, ?string $pickupPoint = null, ?float $timeout = null): Document`
 
-Returns the daily order list (bordero) as HTML.
+Returns the printable bordero for one pickup point and date.
 
-- **Endpoint:** `get_cmd_list.php`
-- **Form:** `userid` and `pwd` only.
-- **Returns:** `Document`.
-- **Throws:** the four common exceptions listed above.
-- **Body handling:** same as `html()`.
+- **Endpoint:** `print_borderou.php`, form POST.
+- **`$date`:** required; `yyyy-mm-dd` or `dd-mm-yyyy`.
+- **`$pickupPoint`:** defaults to `ClientConfig::pickupPoint`; a missing value
+  throws `InvalidArgumentException` before sending.
+- **`$timeout`:** optional per-call timeout.
+- **Returns:** an HTML `Document`.
+
+```php
+$document = $client->reports()->borderou('2026-11-26');
+file_put_contents('bordero.html', $document->contents);
+```
 
 ## Pickup — `$client->pickup()`
 
-### `request(): Document` — `@experimental`
+### `request(?string $pickupPoint = null): string` — `@experimental`
 
-Asks Bookurier for a courier pickup and returns the pickup bordero as HTML. This
-method dispatches a physical courier, has never been exercised against the live
-service, and is covered by unit tests only.
+Asks Bookurier for a courier pickup.
 
-- **Endpoint:** `request_delivery.php`
-- **Form:** `userid` and `pwd` only.
-- **Returns:** `Document`.
-- **Throws:** the four common exceptions listed above.
-- **Body handling:** same as `dailyBordero()`.
+- **Endpoint:** `request_pickup.php`, form POST.
+- **`$pickupPoint`:** defaults to `ClientConfig::pickupPoint`; a missing value
+  throws `InvalidArgumentException` before sending.
+- **Returns:** the confirmation message from the JSON response.
+- **Experimental:** it dispatches a physical courier, has never been exercised
+  against the live service, and may change shape in a minor release. Never
+  auto-retry it.
 
-## Request and Response Objects
+```php
+$message = $client->pickup()->request();
+```
 
-The request DTO, the service enum and the response objects are documented once,
-in [DTOs](DTOS.md):
+## Cities — `$client->cities()`
 
-- [`Order` request fields](DTOS.md#order-request-dto) — XML tag for every
-  constructor argument and the serialization rules.
-- [`ServiceType` enum](DTOS.md#servicetype-enum) — the service codes and their labels.
-- [Response DTOs](DTOS.md#response-dtos) — `OrderStatus`, `HistoryEntry` and
-  `OrderReference`.
-- [`Document`](DTOS.md#document) — `$contents`, `$mimeType` and `isPdf()`.
+### `partnerCities(?string $district = null): Collection`
 
-`createBatch()` builds each `OrderReference` positionally from your `Order` and
-the AWB at the same index; `OrderReference::fromArray()` no longer exists.
+Returns partner-served cities.
 
-## Client Helpers
+- **Endpoint:** `get_partner_cities.php`, JSON POST with `data` as `{}` or
+  `{"district": "..."}`.
+- **Returns:** `Collection<int, PartnerCity>`.
+- **Scope:** partner-served cities only; Bucharest and Ilfov are excluded.
+- **Filter:** the district filter is diacritics-insensitive.
+
+```php
+foreach ($client->cities()->partnerCities() as $city) {
+    echo $city->city, ' ', $city->district, PHP_EOL;
+}
+```
+
+## Client helpers
 
 | Method | Purpose |
 |---|---|
 | `Client::create(httpClient:, requestFactory:, streamFactory:, config:)` | Build a client with defaults; all arguments optional |
 | `getConfig(): ClientConfig` | Current configuration |
-| `withTimeout(?float $timeout): self` | New client sharing the transport and credentials, with a different timeout |
+| `withTimeout(?float $timeout): self` | New client sharing the transport and configuration, with a different timeout |
 | `setCredentials(string $userId, string $password): self` | Replace credentials and return the same client |
 | `createRequest(string $method, string $path): RequestInterface` | Build a PSR-7 request for a path under the configured base URL |
-| `post(string $endpoint, array $form = [], ?float $timeout = null): ResponseInterface` | Form POST with credentials; no body mapping |
+| `postJson(string $endpoint, array $payload, ?float $timeout = null): ResponseInterface` | JSON POST with credentials; no body mapping |
+| `postForm(string $endpoint, array $fields = [], ?float $timeout = null): ResponseInterface` | Form POST with credentials; no body mapping |
+| `get(string $endpoint, array $query = [], ?float $timeout = null): ResponseInterface` | Public GET; no credentials |
 | `send(RequestInterface $request, ?float $timeout = null): ResponseInterface` | Send a prepared request; no credentials added |
 
-`post()` throws `AuthenticationException`, `TransportException` and
-`InvalidArgumentException` (a per-call timeout that cannot be applied to the
-transport). `send()` throws `TransportException` and `InvalidArgumentException`.
-Neither method classifies the response body; use a resource method for typed
-results.
+The low-level methods do not classify the response body; use a resource method for
+typed results. `postJson()` and `postForm()` throw `AuthenticationException` when
+credentials are missing. `send()` and `get()` do not.

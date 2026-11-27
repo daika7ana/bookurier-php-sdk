@@ -9,7 +9,6 @@ use Daika7ana\Bookurier\Exceptions\AuthenticationException;
 use Daika7ana\Bookurier\Exceptions\TransportException;
 use Daika7ana\Bookurier\Exceptions\UnexpectedStatusException;
 use Daika7ana\Bookurier\Exceptions\ValidationException;
-use Daika7ana\Bookurier\Support\Document;
 use Daika7ana\Bookurier\Support\ResponseBody;
 
 final class PickupResource
@@ -19,19 +18,24 @@ final class PickupResource
     ) {}
 
     /**
-     * Asks Bookurier for a courier pickup and returns the pickup bordero as HTML.
+     * Asks Bookurier for a courier pickup and returns the confirmation message.
      *
      * @experimental Dispatches a physical courier, has never been exercised
-     * against the live service, returns HTML and may still change shape in a
-     * minor release; verify the returned bordero before retrying.
+     * against the live service and may still change shape in a minor release;
+     * verify the confirmation before retrying.
      *
      * @throws ValidationException
      * @throws AuthenticationException
      * @throws TransportException
      * @throws UnexpectedStatusException
+     * @throws \InvalidArgumentException when no pickup point is given or configured
      */
-    public function request(): Document
+    public function request(?string $pickupPoint = null): string
     {
-        return ResponseBody::document($this->client->post('request_delivery.php'));
+        $pickup = $this->client->getConfig()->requirePickupPoint($pickupPoint);
+
+        $body = ResponseBody::json($this->client->postForm('request_pickup.php', ['pickup' => $pickup]));
+
+        return $body->message();
     }
 }
